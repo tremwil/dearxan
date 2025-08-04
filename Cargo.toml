@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+members = ["test_dll", "test_launcher"]
 
 [workspace.package]
 authors = ["William Tremblay"]
@@ -30,7 +31,7 @@ internal_api = []
 
 [dependencies]
 log.workspace = true
-pelite = "0.10"
+pelite = { version = "0.10", default-features = false }
 iced-x86 = "1.21"
 memchr = "2.7.4"
 fxhash = "0.2.1"

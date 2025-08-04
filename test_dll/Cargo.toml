@@ -1,0 +1,25 @@
+[package]
+name = "dearxan-test-dll"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+log.workspace = true
+simplelog.workspace = true
+
+[dependencies.dearxan]
+version = "*"
+path = ".."
+features = ["rayon", "disabler-debug"]
+
+[dependencies.windows]
+version = "0.61"
+features = [
+    "Win32_System_Console",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemServices",
+]

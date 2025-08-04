@@ -38,12 +38,9 @@ use pelite::{
     pe::{Pe, PeObject},
     pe64::PeView,
 };
-use windows_sys::{
-    Win32::System::{
-        LibraryLoader::GetModuleHandleA,
-        Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect},
-    },
-    core::PCSTR,
+use windows_sys::Win32::System::{
+    LibraryLoader::GetModuleHandleA,
+    Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect},
 };
 
 use crate::patch::ArxanPatch;
