@@ -51,12 +51,14 @@ impl CfgInfo {
 
 #[derive(Clone, Copy)]
 pub struct ArxanCfgData<D: Clone> {
+    #[allow(dead_code)]
     pub inner: D,
     cfg_info: CfgInfo,
 }
 
 // Information about a possibly-obfuscated call instruction.
 pub struct CallInfo {
+    #[allow(dead_code)]
     /// The value of RSP after taking the call.
     pub target_rsp: u64,
     /// The value of RSP after returning from the call.

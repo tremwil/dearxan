@@ -27,6 +27,8 @@
 //!
 //! Which makes it quite easy to work around.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use closure_ffi::BareFnOnce;
 use iced_x86::{Decoder, DecoderOptions, FlowControl};
 use pelite::{
@@ -34,12 +36,7 @@ use pelite::{
     pe64::PeView,
 };
 
-use crate::disabler::common::clear_being_debugged;
-
-use super::{
-    call_hook::CallHook,
-    common::{game_code_buffer, game_module},
-};
+use super::{call_hook::CallHook, game_code_buffer, game_module};
 
 /// Takes PE entry point and returns original entry point.
 pub type SteamStub31Main = unsafe extern "C" fn(u64) -> u64;
@@ -54,9 +51,7 @@ pub fn find_steamstub31_main(pe: PeView<'_>) -> Option<(u64, u64)> {
 
     let entry_rva = pe.optional_header().AddressOfEntryPoint;
     let base = pe.optional_header().ImageBase;
-    let [key, sig] = pe
-        .derva::<[u32; 2]>(entry_rva - STEAMSTUB_HEADER_SIZE as u32)
-        .ok()?;
+    let [key, sig] = pe.derva::<[u32; 2]>(entry_rva - STEAMSTUB_HEADER_SIZE as u32).ok()?;
     if key ^ sig != EXPECTED_SIGNATURE {
         return None;
     }
@@ -85,49 +80,95 @@ pub fn find_steamstub31_main(pe: PeView<'_>) -> Option<(u64, u64)> {
 }
 
 /// Schedule a callback to run after SteamStub 3.1 finishes unpacking the game.
-/// The callback receives the original entry point before SteamStub was
-/// applied to the executable.
+/// It runs immediately if SteamStub was not detected.
 ///
-/// Runs immediately if SteamStub is not detected.
+/// The callback receives the following:
+/// - a pointer original entry point before SteamStub was applied to the executable
+/// - a boolean indicating whether SteamStub 3.1 was detected
 ///
-/// # Warning
-/// This should only be called **once before the entry point of the game runs**.
-pub unsafe fn schedule_after_steamstub(callback: impl FnOnce(u64) + Send + 'static) {
+/// # Panics
+/// If called more than once.
+///
+/// <div class="warning">
+///
+/// Note this function is called by [`schedule_after_arxan`](super::schedule_after_arxan)
+/// and [`neuter_arxan`](super::neuter_arxan), both of which can only be called once.
+/// Hence all three are mutually exclusive.
+///
+/// </div>
+///
+/// # Safety
+/// This should only be called before the game's entry point is executed.
+pub unsafe fn schedule_after_steamstub(callback: impl FnOnce(*const u8, bool) + Send + 'static) {
+    static CALLED: AtomicBool = AtomicBool::new(false);
+    if CALLED.swap(true, Ordering::Relaxed) {
+        panic!("schedule_after_steamstub must not be called more than once");
+    }
+
     let pe = game_module();
     let base = pe.optional_header().ImageBase;
     let opt_header = pe.optional_header();
     let entry_point = opt_header.ImageBase + opt_header.AddressOfEntryPoint as u64;
 
-    match find_steamstub31_main(pe) {
-        None => callback(entry_point),
-        Some((call_ptr, _)) => unsafe {
-            log::debug!("SteamStub detected, CALL address: {call_ptr:016x}");
-            let call_hook = &*Box::leak(Box::new(CallHook::<SteamStub31Main>::new(
-                call_ptr as *mut u8,
-            )));
+    let Some((call_ptr, _)) = find_steamstub31_main(pe)
+    else {
+        log::debug!("SteamStub not detected, running callback immediately");
+        callback(entry_point as *const _, false);
+        return;
+    };
 
-            let hook = BareFnOnce::new_c_in(
-                move |entry| {
-                    call_hook.unhook();
+    log::debug!("SteamStub detected, CALL to unpacking routine: {call_ptr:016x}");
+    let call_hook = &*Box::leak(Box::new(unsafe {
+        CallHook::<SteamStub31Main>::new(call_ptr as *mut u8)
+    }));
 
-                    // SteamStub 3.1 checks the PEB for the IsDebugged flag on startup.
-                    // We'll need to clear it first.
-                    clear_being_debugged();
-                    log::debug!("Set PEB->BeingDebugged to false");
+    let hook = BareFnOnce::new_c_in(
+        move |entry| unsafe {
+            call_hook.unhook();
 
-                    log::debug!("Running SteamStub unpacker");
-                    let original_entry = call_hook.original()(entry);
-                    log::debug!(
-                        "Original entry point: {original_entry:016x} (RVA {:x})",
-                        original_entry - base
-                    );
-                    callback(original_entry);
-                    original_entry
-                },
-                game_code_buffer(),
+            // SteamStub 3.1 checks the PEB for the IsDebugged flag on startup.
+            // We'll need to clear it first.
+            log::debug!("setting PEB->BeingDebugged to false");
+            let debug_flag = peb_being_debugged_flag();
+            let prv_debug_flag = debug_flag.swap(false, Ordering::Relaxed);
+
+            log::debug!("running SteamStub unpacker");
+            let original_entry = call_hook.original()(entry);
+            log::debug!(
+                "entry point before SteamStub: {original_entry:016x} (RVA {:x})",
+                original_entry - base
             );
 
-            call_hook.hook_with(hook.leak());
+            match debug_flag.compare_exchange(
+                false,
+                prv_debug_flag,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    log::debug!("set PEB->BeingDebugged back to original value ({prv_debug_flag})")
+                }
+                Err(new) => log::debug!("PEB->BeingDebugged was changed by foreign code to {new}"),
+            };
+
+            callback(original_entry as *const _, true);
+            original_entry
         },
-    };
+        game_code_buffer(),
+    );
+
+    unsafe { call_hook.hook_with(hook.leak()) };
+}
+
+unsafe fn peb_being_debugged_flag<'a>() -> &'a AtomicBool {
+    let ptr: *mut bool;
+    unsafe {
+        std::arch::asm!(
+            "mov {reg}, qword ptr GS:[0x30]",
+            "mov {reg}, qword ptr [{reg} + 0x60]",
+            "lea {reg} [{reg} + 0x2]",
+            reg = out(reg) ptr
+        );
+        AtomicBool::from_ptr(ptr)
+    }
 }

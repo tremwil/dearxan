@@ -41,6 +41,7 @@ crate-type = ["rlib", "staticlib"]
 disabler = ["dep:closure-ffi", "dep:windows"]
 ffi = ["disabler"]
 disabler-debug = ["disabler"]
+internal_api = []
 
 [dependencies]
 log.workspace = true

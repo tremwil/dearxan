@@ -192,50 +192,6 @@ impl<I: ImageView> MemoryStore<I> {
         }
     }
 
-    #[inline]
-    pub fn known_slices<T>(
-        &mut self,
-        addr: u64,
-        max_size: usize,
-        mut cb: impl FnMut(u64, &[u8]) -> ControlFlow<T>,
-    ) -> ControlFlow<T> {
-        if max_size == 0 {
-            return ControlFlow::Continue(());
-        }
-        let (i_start_block, start_ofs) = Self::block_and_offset(addr);
-        let (i_end_block, end_ofs) = Self::block_and_offset(addr + max_size as u64 - 1);
-
-        if i_start_block == i_end_block {
-            let block = match self.get_block(i_start_block) {
-                None => return ControlFlow::Continue(()),
-                Some(b) => b,
-            };
-            block.known_slices(start_ofs, end_ofs + 1, |ofs, bytes| {
-                cb((i_start_block * MemoryBlock::SIZE) as u64 + ofs, bytes)
-            })
-        }
-        else {
-            if let Some(block) = self.get_block(i_start_block) {
-                block.known_slices(start_ofs, MemoryBlock::SIZE, |ofs, bytes| {
-                    cb((i_start_block * MemoryBlock::SIZE) as u64 + ofs, bytes)
-                })?;
-            }
-            for i_mid_block in (i_start_block + 1)..(i_end_block - 1) {
-                if let Some(block) = self.get_block(i_mid_block) {
-                    block.known_slices(0, MemoryBlock::SIZE, |ofs, bytes| {
-                        cb((i_mid_block * MemoryBlock::SIZE) as u64 + ofs, bytes)
-                    })?;
-                }
-            }
-            if let Some(block) = self.get_block(i_end_block) {
-                block.known_slices(0, end_ofs + 1, |ofs, bytes| {
-                    cb((i_end_block * MemoryBlock::SIZE) as u64 + ofs, bytes)
-                })?;
-            }
-            ControlFlow::Continue(())
-        }
-    }
-
     fn block_and_offset(addr: u64) -> (usize, usize) {
         (
             addr as usize / MemoryBlock::SIZE,

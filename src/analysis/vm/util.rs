@@ -12,6 +12,7 @@ pub fn is_cmov(mnemonic: Mnemonic) -> bool {
 /// - the instruction and stack pointer values;
 /// - the dissassembly of the current instruction;
 /// - all register and memory accesses performed by the current instruction.
+#[allow(dead_code)] // Public when internal_api is enabled
 pub fn format_step_state<I: super::ImageView, D: Clone>(step: &super::RunStep<'_, I, D>) -> String {
     use std::fmt::Write;
 

@@ -9,8 +9,8 @@ use closure_ffi::{JitAlloc, JitAllocError};
 use pelite::util::AlignTo;
 use windows::Win32::System::{
     Memory::{
-        VirtualAlloc, VirtualFree, VirtualQuery, MEMORY_BASIC_INFORMATION, MEM_COMMIT, MEM_FREE,
-        MEM_RELEASE, MEM_RESERVE, PAGE_EXECUTE_READWRITE,
+        MEM_COMMIT, MEM_FREE, MEM_RELEASE, MEM_RESERVE, MEMORY_BASIC_INFORMATION,
+        PAGE_EXECUTE_READWRITE, VirtualAlloc, VirtualFree, VirtualQuery,
     },
     SystemInformation::{GetSystemInfo, SYSTEM_INFO},
 };
@@ -27,15 +27,16 @@ unsafe impl Send for CodeBuffer {}
 unsafe impl Sync for CodeBuffer {}
 
 impl CodeBuffer {
-    pub fn alloc_near(region: impl IntoUsizeRange, size: usize, max_sep: usize) -> Option<Self> {
-        let region = region.into_region();
+    pub fn alloc_near(region: Range<*const u8>, size: usize, max_sep: usize) -> Option<Self> {
+        let region = region.start.addr()..region.end.addr();
 
         // Get allocation granularity (typically 64KB)
         let mut si = SYSTEM_INFO::default();
         unsafe { GetSystemInfo(&mut si) };
         let gran = si.dwAllocationGranularity as usize;
 
-        // compute lowest possible allocation address (note that the first block cannot be allocated)
+        // compute lowest possible allocation address (note that the first block cannot be
+        // allocated)
         let lowest_base = (region.end.saturating_sub(max_sep).max(gran) + gran - 1).align_to(gran);
 
         // Search free region closest to target module to allocate our hook memory at,
@@ -112,9 +113,7 @@ impl Drop for CodeBuffer {
 
 impl JitAlloc for CodeBuffer {
     fn alloc(&self, size: usize) -> Result<(*const u8, *mut u8), JitAllocError> {
-        self.reserve(size)
-            .map(|p| (p as *const u8, p as *mut u8))
-            .ok_or(JitAllocError)
+        self.reserve(size).map(|p| (p as *const u8, p as *mut u8)).ok_or(JitAllocError)
     }
 
     // CodeBuffer is a simple arena without the ability to free individual blocks
@@ -135,39 +134,5 @@ impl JitAlloc for CodeBuffer {
         size: usize,
         access: closure_ffi::jit_alloc::ProtectJitAccess,
     ) {
-    }
-}
-
-pub trait IntoUsizeRange {
-    fn into_region(self) -> Range<usize>;
-}
-impl<T> IntoUsizeRange for *const [T] {
-    fn into_region(self) -> Range<usize> {
-        self.addr()..(self.addr() + self.len())
-    }
-}
-impl<T> IntoUsizeRange for *mut [T] {
-    fn into_region(self) -> Range<usize> {
-        self.addr()..(self.addr() + self.len())
-    }
-}
-impl<T> IntoUsizeRange for Range<*const T> {
-    fn into_region(self) -> Range<usize> {
-        self.start.addr()..self.end.addr()
-    }
-}
-impl<T> IntoUsizeRange for Range<*mut T> {
-    fn into_region(self) -> Range<usize> {
-        self.start.addr()..self.end.addr()
-    }
-}
-impl<T> IntoUsizeRange for &[T] {
-    fn into_region(self) -> Range<usize> {
-        self.as_ptr_range().into_region()
-    }
-}
-impl<T> IntoUsizeRange for &mut [T] {
-    fn into_region(self) -> Range<usize> {
-        self.as_ptr_range().into_region()
     }
 }

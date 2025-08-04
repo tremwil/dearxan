@@ -1,11 +1,27 @@
+#[cfg(not(feature = "internal_api"))]
+mod cfg;
+#[cfg(not(feature = "internal_api"))]
+mod encryption;
+#[cfg(not(feature = "internal_api"))]
+mod stub_info;
+#[cfg(not(feature = "internal_api"))]
+mod vm;
+
+#[cfg(feature = "internal_api")]
 pub mod cfg;
+#[cfg(feature = "internal_api")]
 pub mod encryption;
+#[cfg(feature = "internal_api")]
 pub mod stub_info;
+#[cfg(feature = "internal_api")]
 pub mod vm;
 
-pub use encryption::{EncryptedRegion, EncryptedRegionList};
-pub use stub_info::{ReturnGadget, StubAnalysisError, StubAnalyzer, StubInfo};
-pub use vm::ImageView;
+#[doc(inline)]
+pub use self::{
+    encryption::{EncryptedRegion, EncryptedRegionList, shannon_entropy},
+    stub_info::{ReturnGadget, StubAnalysisError, StubAnalyzer, StubInfo},
+    vm::ImageView,
+};
 
 fn find_test_rsp_instructions<'a, I: ImageView>(
     image: &'a I,
@@ -28,18 +44,24 @@ pub fn analyze_all_stubs_with<
     image: I,
     analyzer: StubAnalyzer,
 ) -> Vec<Result<StubInfo, StubAnalysisError>> {
+    #[cfg(feature = "rayon")]
+    use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
     let test_rsp_vas: Vec<_> = find_test_rsp_instructions(&image).collect();
 
     log::debug!("Found {} potential Arxan stubs", test_rsp_vas.len());
 
     #[cfg(feature = "rayon")]
-    return {
-        use rayon::iter::{IntoParallelIterator, ParallelIterator};
-        test_rsp_vas.into_par_iter().map(|va| analyzer.analyze(&image, va)).collect()
-    };
+    let iter = test_rsp_vas.into_par_iter();
     #[cfg(not(feature = "rayon"))]
-    let stub_infos: Vec<_> =
-        test_rsp_vas.into_iter().map(|va| analyzer.analyze(&image, va)).collect();
+    let iter = test_rsp_vas.into_iter();
+
+    // Exclude don't report `NotAStub` errors as errors, just filter them out
+    iter.filter_map(|va| match analyzer.analyze(&image, va) {
+        Err(StubAnalysisError::NotAStub(_)) => None,
+        other => Some(other),
+    })
+    .collect()
 }
 
 /// Analyze all Arxan stubs found in the executable image using a default [`StubAnalyzer`]

@@ -122,6 +122,7 @@ impl<I: ImageView, D: Clone> RunStep<'_, I, D> {
     }
 
     /// Subslice of the execution path starting at the point where this fork was created.
+    #[allow(dead_code)] // Public when internal_api is enabled
     pub fn current_fork_path(&self) -> &[u64] {
         &self.execution_path[self.fork_index..]
     }
@@ -138,6 +139,7 @@ impl<I: ImageView, D: Clone> RunStep<'_, I, D> {
     ///
     /// If `depth` is greater or equal to `self.past_forks.len()`, will return the entire execution
     /// path.
+    #[allow(dead_code)] // Public when internal_api is enabled
     pub fn fork_path_since(&self, depth: usize) -> &[u64] {
         let Some(i_tgt_fork) = self.past_forks.len().checked_sub(depth)
         else {

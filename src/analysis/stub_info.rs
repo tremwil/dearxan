@@ -281,28 +281,28 @@ impl<'a> StubScanState<'a> {
 /// Error encountered during the analysis of an Arxan stub.
 #[derive(Debug, Clone, Copy)]
 pub enum StubAnalysisError {
-    /// The analyzed code is not an Arxan stub.
-    NotAStub,
-    /// The address of the context restoration part of the stub was not found.
-    ContextPopNotFound,
-    /// The maximum number of iterations has been reached.
-    MaxStepsReached(usize),
+    /// The analyzed code at this address is not an Arxan stub.
+    NotAStub(u64),
+    /// The address of the context restoration part of the stub at this address was not found.
+    ContextPopNotFound(u64),
+    /// The maximum number of iterations (second tuple field) has been reached when analyzing the
+    /// stub at this address.
+    MaxStepsReached(u64, usize),
 }
 
 impl std::fmt::Display for StubAnalysisError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotAStub => f.write_str("analyzed code is not an Arxan stub"),
+            Self::NotAStub(addr) => write!(f, "analyzed code at {addr:x} is not an Arxan stub"),
 
-            Self::ContextPopNotFound => {
-                f.write_str("stub context restoration routine was not found")
-            }
-            Self::MaxStepsReached(m) => {
-                write!(
-                    f,
-                    "analysis did not complete before the maximum number of steps ({m})"
-                )
-            }
+            Self::ContextPopNotFound(addr) => write!(
+                f,
+                "stub context restoration routine was not found for {addr:x}"
+            ),
+            Self::MaxStepsReached(addr, steps) => write!(
+                f,
+                "analysis for {addr:x} did not complete before the maximum number of steps ({steps})"
+            ),
         }
     }
 }
@@ -389,7 +389,10 @@ impl StubAnalyzer {
             StepKind::SingleStep
         });
         if halted == Some(false) {
-            return Err(StubAnalysisError::MaxStepsReached(self.max_steps));
+            return Err(StubAnalysisError::MaxStepsReached(
+                test_rsp_va,
+                self.max_steps,
+            ));
         }
         else if halted.is_none() {
             log::trace!("stub {test_rsp_va:x} required a full visit");
@@ -399,7 +402,7 @@ impl StubAnalyzer {
             test_rsp_va,
             context_pop_va: scan_state
                 .context_pop_va
-                .ok_or(StubAnalysisError::ContextPopNotFound)?,
+                .ok_or(StubAnalysisError::ContextPopNotFound(test_rsp_va))?,
             return_gadget: scan_state.return_gadget,
             encrypted_regions: match scan_state.encryption {
                 EncryptionState::SearchingRegions(_) => None,

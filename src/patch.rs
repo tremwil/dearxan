@@ -3,7 +3,7 @@
 use fxhash::FxHashMap;
 use iced_x86::IcedError;
 
-use crate::analysis::{EncryptedRegionList, ImageView, StubInfo, encryption::shannon_entropy};
+use crate::analysis::{EncryptedRegionList, ImageView, StubInfo, shannon_entropy};
 
 /// An individual patch to the executable image.
 #[derive(Debug, Clone)]
