@@ -1,0 +1,501 @@
+//! Analyze Arxan stubs, attempting to extracting the information about them.
+
+use fxhash::FxBuildHasher;
+use iced_x86::{Code, OpKind, Register};
+use indexmap::IndexMap;
+
+use super::{
+    cfg::{ArxanCfgVisitor, CallInfo},
+    encryption::{EncryptedRegion, EncryptedRegionList},
+    vm::{ImageView, MemoryStore, ProgramState, Registers, RunStep, StepKind},
+};
+
+/// Information about an Arxan return gadget.
+///
+/// Arxan tries to prevent trivially stopping its stubs from running by simply returning from them
+/// by first pushing 3 "bad" addresses to the stack. As the stub routine executes, it will write
+/// above its own stack frame to replace these bad addresses with the "true" addresses
+/// which allow the stub to return properly.
+#[derive(Debug, Clone)]
+pub struct ReturnGadget {
+    /// The stack offset (relative to the value of RSP during the `test rsp, 0xf` instruction) at
+    /// which the return gadget is written.
+    pub stack_offset: usize,
+    /// The virtual address of the return gadget.
+    pub address: u64,
+}
+
+/// Information extracted from an analyzed Arxan stub.
+#[derive(Debug, Clone)]
+pub struct StubInfo {
+    /// The virtual address of the stub's `test rsp, 0xf` instruction.
+    ///
+    /// This particular instruction is useful as it does not typically appear in normal code, since
+    /// there are better ways to align the stack. Hence its presence makes it very easy to scan for
+    /// Arxan stubs.
+    pub test_rsp_va: u64,
+    /// The virtual address of the "exit" portion of the stub, responsible for restoring the
+    /// execution context.
+    pub context_pop_va: u64,
+    /// The top-most return gadget.
+    ///
+    /// Although Arxan pushes 3 "bad" addresses to the stack, one only needs to know the value of
+    /// the top one to locate the stub's return address.
+    pub return_gadget: Option<ReturnGadget>,
+    /// A list of memory regions that are encrypted at rest and get decrypted by the stub.
+    ///
+    /// The stub may also be an "encryption" stub, in which case the bytes it writes to the region
+    /// were randomly generated.
+    pub encrypted_regions: Option<EncryptedRegionList>,
+}
+
+#[derive(Debug, Clone)]
+struct BlockTeaCandidate<'a> {
+    tea_block_decrypt: u64,
+    ciphertext: &'a [u8],
+    key_va: u64,
+    key: &'a [u8; 16],
+}
+
+#[derive(Debug, Clone)]
+struct RegionListInfo {
+    tea_block_decrypt: u64,
+    region_list_key_va: u64,
+    encrypted_regions: Vec<EncryptedRegion>,
+}
+
+#[derive(Debug, Clone)]
+struct RegionsKeyCandidate<'a> {
+    tea_block_decrypt: u64,
+    next_lea_test: usize,
+    key_va: u64,
+    key: &'a [u8; 16],
+}
+
+#[derive(Debug, Clone)]
+enum EncryptionState<'a> {
+    SearchingRegions((Vec<RegionsKeyCandidate<'a>>, Vec<u64>)),
+    SearchingCiphertext(RegionListInfo),
+    Found(EncryptedRegionList),
+}
+
+impl Default for EncryptionState<'_> {
+    fn default() -> Self {
+        Self::SearchingRegions((Vec::default(), Vec::default()))
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct StubScanState<'a> {
+    init_rsp: u64,
+    return_gadget: Option<ReturnGadget>,
+    context_pop_va: Option<u64>,
+    encryption: EncryptionState<'a>,
+    /// Maps the first 8 bytes of memory at an LEA [rip+...] instruction to its address
+    static_lea_lookup: IndexMap<u64, u64, FxBuildHasher>,
+    /// Candidate calls to the stub's tea block decrypt function
+    tea_candidates: Vec<BlockTeaCandidate<'a>>,
+}
+
+impl<'a> StubScanState<'a> {
+    /// Search for the instruction writing a return gadget.
+    /// this is a code pointer written above the stub's stack-saved context
+    fn extract_return_gadget<I: ImageView, D: Clone>(
+        &self,
+        step: &RunStep<I, D>,
+    ) -> Option<ReturnGadget> {
+        if step.instruction.code() != Code::Mov_rm64_r64
+            || step.instruction.op0_kind() != OpKind::Memory
+        {
+            return None;
+        }
+        let write_addr = step.state.virtual_address(step.instruction, 0)?;
+        let address = step.state.get_operand_value(step.instruction, 1)?;
+        let stack_offset = write_addr.checked_sub(self.init_rsp)? as usize;
+        (stack_offset < 0x400).then_some(ReturnGadget {
+            stack_offset,
+            address,
+        })
+    }
+
+    fn search_region_candidates(&mut self, image: &impl ImageView, new_block_decrypt: Option<u64>) {
+        let EncryptionState::SearchingRegions((key_candidates, block_decrypts)) =
+            &mut self.encryption
+        else {
+            return;
+        };
+        block_decrypts.extend(new_block_decrypt);
+
+        for key_info in key_candidates {
+            // only try a key if the call it was detected from matches one we got full info from
+            if !block_decrypts.contains(&key_info.tea_block_decrypt) {
+                continue;
+            }
+            let Some(lea_targets) = self.static_lea_lookup.get_range(key_info.next_lea_test..)
+            else {
+                continue;
+            };
+
+            let candidate_ctexts = lea_targets.values().filter_map(|&va| image.read(va, 8));
+            for ctext in candidate_ctexts {
+                if let Some(regions) = EncryptedRegion::try_decrypt_list(ctext, key_info.key) {
+                    self.encryption = EncryptionState::SearchingCiphertext(RegionListInfo {
+                        tea_block_decrypt: key_info.tea_block_decrypt,
+                        region_list_key_va: key_info.key_va,
+                        encrypted_regions: regions,
+                    });
+                    log::trace!("found region list info: {:x?}", self.encryption);
+
+                    self.search_ciphertext_candidates();
+                    return;
+                }
+            }
+            key_info.next_lea_test = lea_targets.len();
+        }
+    }
+
+    fn search_ciphertext_candidates(&mut self) {
+        let EncryptionState::SearchingCiphertext(region_list) = &self.encryption
+        else {
+            return;
+        };
+
+        self.tea_candidates.retain(|c| {
+            c.tea_block_decrypt == region_list.tea_block_decrypt
+                && c.key_va != region_list.region_list_key_va
+        });
+
+        if let Some(ctext_decrypt) = self.tea_candidates.first() {
+            let encrypted_regions = EncryptedRegionList::try_new(
+                region_list.encrypted_regions.clone(),
+                ctext_decrypt.ciphertext,
+                ctext_decrypt.key,
+            )
+            .unwrap();
+
+            log::trace!(
+                "encryption info extracted, regions: {:x?}",
+                encrypted_regions.regions
+            );
+
+            self.encryption = EncryptionState::Found(encrypted_regions);
+        }
+    }
+
+    fn on_tea_info<I: ImageView, D: Clone>(
+        &mut self,
+        tea_block_decrypt: u64,
+        step: &RunStep<&'a I, D>,
+    ) -> Option<()> {
+        let image = *step.state.memory.image();
+
+        // The second argument of the block decrypt function is the 128-bit key
+        let key_va = step.state.registers.rdx()?;
+        let key: &'a [u8; 16] =
+            image.read(key_va, 16).and_then(|slice| slice[..16].try_into().ok())?;
+
+        log::trace!("possible tea key = {key:02x?} ({key_va:x})");
+
+        if let EncryptionState::SearchingRegions((candidates, _)) = &mut self.encryption {
+            candidates.push(RegionsKeyCandidate {
+                tea_block_decrypt,
+                next_lea_test: 0,
+                key_va,
+                key,
+            });
+            self.search_region_candidates(image, None);
+        }
+
+        // The first argument is a pointer to an 8-byte block to decrypt in place
+        // we try to match its encyrpted value with a static address using the lea map
+        // to extract the full ciphertext
+        #[rustfmt::skip]
+        let ctext_stack_va = step.state.registers.rcx().filter(|&va| va < self.init_rsp)?;
+        let ctext_block = step.state.memory.read_int(ctext_stack_va, 8)?;
+        let ctext_va = *self.static_lea_lookup.get(&ctext_block)?;
+        let ctext_bytes = image.read(ctext_va, 8)?;
+
+        self.tea_candidates.push(BlockTeaCandidate {
+            tea_block_decrypt,
+            key_va,
+            key,
+            ciphertext: ctext_bytes,
+        });
+
+        log::trace!("possible tea ciphertext at {ctext_va:x}");
+
+        self.search_region_candidates(image, Some(tea_block_decrypt));
+        self.search_ciphertext_candidates();
+        None
+    }
+
+    fn update<I: ImageView, D: Clone>(&mut self, step: &RunStep<&'a I, D>) -> () {
+        if self.return_gadget.is_none() {
+            self.return_gadget = self.extract_return_gadget(&step);
+            if let Some(g) = self.return_gadget.as_ref() {
+                log::trace!("return gadget found: {g:x?}");
+            }
+        }
+        #[cfg(test)]
+        if log::max_level() >= log::LevelFilter::Trace {
+            println!("{}", super::vm::util::format_step_state(&step));
+        }
+
+        // Track pointee values for LEA reg, [rip+...] instructions
+        if step.instruction.code() == Code::Lea_r64_m
+            && step.instruction.memory_base() == Register::RIP
+        {
+            step.state
+                .virtual_address(step.instruction, 1)
+                .and_then(|va| step.state.memory.read_int(va, 8).map(|m| (va, m)))
+                .inspect(|&(va, mem)| {
+                    self.static_lea_lookup.insert(mem, va);
+                });
+        }
+
+        // Check if this instruction is a call
+        let Some(call) = CallInfo::from_step(&step)
+        else {
+            return;
+        };
+
+        // The first return we find will point to the context pop part of the stub
+        if let Some(ret) = call.return_ip {
+            self.context_pop_va.get_or_insert(ret);
+        }
+
+        // If we know the call target, analyze arguments to try to find the tea block decrypt
+        // routine once found, we can use it to find the rest of the tea encryption info
+        if let Some(tgt) = call.target_ip {
+            self.on_tea_info(tgt, step);
+        }
+    }
+
+    fn can_stop(&self) -> bool {
+        self.context_pop_va.is_some()
+            && self.return_gadget.is_some()
+            && matches!(self.encryption, EncryptionState::Found(_))
+    }
+}
+
+/// Error encountered during the analysis of an Arxan stub.
+#[derive(Debug, Clone, Copy)]
+pub enum StubAnalysisError {
+    /// The analyzed code is not an Arxan stub.
+    NotAStub,
+    /// The address of the context restoration part of the stub was not found.
+    ContextPopNotFound,
+    /// The maximum number of iterations has been reached.
+    MaxStepsReached(usize),
+}
+
+impl std::fmt::Display for StubAnalysisError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotAStub => f.write_str("analyzed code is not an Arxan stub"),
+
+            Self::ContextPopNotFound => {
+                f.write_str("stub context restoration routine was not found")
+            }
+            Self::MaxStepsReached(m) => {
+                write!(
+                    f,
+                    "analysis did not complete before the maximum number of steps ({m})"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for StubAnalysisError {}
+
+/// Analyzes Arxan stubs, producing [`StubInfo`] on success.
+#[derive(Debug, Clone, Copy)]
+pub struct StubAnalyzer {
+    max_steps: usize,
+    init_rsp: u64,
+}
+
+impl Default for StubAnalyzer {
+    fn default() -> Self {
+        Self {
+            max_steps: 0x100000,
+            init_rsp: 0x10000,
+        }
+    }
+}
+
+impl StubAnalyzer {
+    /// Create a new [`StubAnalyzer`] with the default configuration.
+    pub fn new() -> Self {
+        Self {
+            max_steps: 0x100000,
+            init_rsp: 0x10000,
+        }
+    }
+
+    /// Set the maximum amount of steps the analyzer can spend visiting the stub's CFG before giving
+    /// up.
+    ///
+    /// The default value is 2^20 which is slightly over a million steps.
+    pub fn max_steps(self, max_steps: usize) -> Self {
+        Self { max_steps, ..self }
+    }
+
+    /// Set the initial value of RSP used to emulate the stub.
+    ///
+    /// The default value is 0x10000 (2^16).
+    pub fn init_rsp(self, init_rsp: u64) -> Self {
+        Self { init_rsp, ..self }
+    }
+
+    /// Analyze an Arxan stub in the executable image `image` given the virtual address of it's
+    /// `test rsp, 0xf` instruction.
+    pub fn analyze(
+        &self,
+        image: &impl ImageView,
+        test_rsp_va: u64,
+    ) -> Result<StubInfo, StubAnalysisError> {
+        let state = ProgramState {
+            rip: Some(test_rsp_va),
+            registers: Registers::new([(Register::RSP, self.init_rsp)]),
+            memory: MemoryStore::new_initialized(image, [(self.init_rsp, 0x10u64.to_le_bytes())]),
+            user_data: (),
+        };
+
+        let mut step_count = 0;
+        let mut scan_state = StubScanState {
+            init_rsp: self.init_rsp,
+            ..Default::default()
+        };
+
+        let halted = ArxanCfgVisitor(state).run(|step| {
+            step_count += 1;
+            if step_count > self.max_steps {
+                return StepKind::Stop(false);
+            }
+
+            scan_state.update(&step);
+            if scan_state.can_stop() {
+                return StepKind::Stop(true);
+            }
+
+            // If exiting, we know for sure that if there was a return gadget, we saw it
+            let exiting_stub = step.state.registers.rsp().is_some_and(|rsp| rsp > self.init_rsp);
+            if exiting_stub {
+                return StepKind::StopFork;
+            }
+
+            StepKind::SingleStep
+        });
+        if halted == Some(false) {
+            return Err(StubAnalysisError::MaxStepsReached(self.max_steps));
+        }
+        else if halted.is_none() {
+            log::trace!("stub {test_rsp_va:x} required a full visit");
+        }
+
+        Ok(StubInfo {
+            test_rsp_va,
+            context_pop_va: scan_state
+                .context_pop_va
+                .ok_or(StubAnalysisError::ContextPopNotFound)?,
+            return_gadget: scan_state.return_gadget,
+            encrypted_regions: match scan_state.encryption {
+                EncryptionState::SearchingRegions(_) => None,
+                EncryptionState::SearchingCiphertext(regions) => {
+                    log::warn!(
+                        "stub {test_rsp_va:x}: encrypted region list found, but not ciphertext: {regions:x?}"
+                    );
+                    None
+                }
+                EncryptionState::Found(regions) => Some(regions),
+            },
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fxhash::FxHashMap;
+    use memchr::memmem;
+
+    use crate::analysis::{
+        encryption::{EncryptedRegionList, shannon_entropy},
+        stub_info::StubAnalyzer,
+        vm::ImageView,
+    };
+    use crate::test_util::{init_log, latest_fsbins};
+
+    #[test]
+    fn all_stub_info_found() {
+        init_log(log::LevelFilter::Debug);
+
+        latest_fsbins()
+            .iter()
+            .filter(|f| f.game == "ac6")
+            .filter_map(|f| f.load_64().ok())
+            .for_each(|exe| {
+                let game = exe.game();
+                let ver = exe.ver();
+                let pe = exe.pe_view();
+                // SAFETY: Backing memory of the view is a vector, all bytes in the slice are valid
+                let test_rsp_vas: Vec<_> = pe
+                    .sections()
+                    .flat_map(|(va, b)| {
+                        memmem::find_iter(b, b"\x48\xf7\xc4\x0f\x00\x00\x00")
+                            .map(move |o| va + o as u64)
+                    })
+                    .collect();
+
+                log::info!("[{game} v{ver}] found {} arxan stubs", test_rsp_vas.len());
+
+                let mut region_list_pairs: FxHashMap<u32, Vec<EncryptedRegionList>> =
+                    FxHashMap::default();
+
+                for (i, &test_rsp_va) in test_rsp_vas.iter().enumerate() {
+                    let stub_info = StubAnalyzer::new().analyze(&pe, test_rsp_va);
+                    match stub_info {
+                        Ok(stub_info) => {
+                            log::debug!("[{game} v{ver}] {test_rsp_va:x} (#{i:04}) -> OK");
+
+                            if let Some(decrypted) = stub_info.encrypted_regions {
+                                if decrypted.decrypted_stream.len() == 0 {
+                                    log::warn!("empty decrypted stream!");
+                                    continue;
+                                }
+
+                                region_list_pairs
+                                    .entry(decrypted.regions.first().unwrap().rva)
+                                    .or_default()
+                                    .push(decrypted);
+                            }
+                        }
+                        Err(err) => log::warn!(
+                            "[{game} v{ver}] stub info not found for {test_rsp_va:x} (#{i}): {err}"
+                        ),
+                    }
+                }
+
+                println!("\n\n");
+                for (first_rva, regions) in region_list_pairs.iter() {
+                    log::info!("rva: {first_rva:016x} #routines: {}", regions.len());
+                    for region in regions.iter() {
+                        let entropy = shannon_entropy(&region.decrypted_stream);
+                        let trimmed_stream = pretty_hex::pretty_hex(
+                            &region
+                                .decrypted_stream
+                                .get(..0x100)
+                                .unwrap_or(&region.decrypted_stream),
+                        );
+                        log::info!(
+                            " - length = {} entropy = {:.03} stream[..0x100]: {}",
+                            region.decrypted_stream.len(),
+                            entropy,
+                            trimmed_stream
+                        );
+                    }
+                }
+            });
+    }
+}

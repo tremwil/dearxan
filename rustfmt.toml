@@ -1,0 +1,9 @@
+indent_style = "Block"
+reorder_imports = true
+group_imports = "StdExternalCrate"
+control_brace_style = "ClosingNextLine"
+chain_width = 80
+merge_derives = true
+single_line_if_else_max_width = 80
+wrap_comments = true
+comment_width = 100
