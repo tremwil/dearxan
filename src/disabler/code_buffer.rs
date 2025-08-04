@@ -7,7 +7,7 @@ use std::{
 
 use closure_ffi::{JitAlloc, JitAllocError};
 use pelite::util::AlignTo;
-use windows::Win32::System::{
+use windows_sys::Win32::System::{
     Memory::{
         MEM_COMMIT, MEM_FREE, MEM_RELEASE, MEM_RESERVE, MEMORY_BASIC_INFORMATION,
         PAGE_EXECUTE_READWRITE, VirtualAlloc, VirtualFree, VirtualQuery,
@@ -45,7 +45,7 @@ impl CodeBuffer {
         let mut query_base = lowest_base;
         while unsafe {
             VirtualQuery(
-                Some(query_base as *const _),
+                query_base as *const _,
                 &mut minfo,
                 size_of::<MEMORY_BASIC_INFORMATION>(),
             ) != 0
@@ -68,7 +68,7 @@ impl CodeBuffer {
             // Otherwise, block satisfies all requirements
             let alloc_base = unsafe {
                 VirtualAlloc(
-                    Some(block_start as *const _),
+                    block_start as *const _,
                     size,
                     MEM_RESERVE | MEM_COMMIT,
                     PAGE_EXECUTE_READWRITE,
@@ -107,7 +107,9 @@ impl CodeBuffer {
 
 impl Drop for CodeBuffer {
     fn drop(&mut self) {
-        unsafe { VirtualFree(self.alloc_base, 0, MEM_RELEASE).unwrap() }
+        if unsafe { VirtualFree(self.alloc_base, 0, MEM_RELEASE) } == 0 {
+            log::error!("VirtualFree failed")
+        }
     }
 }
 

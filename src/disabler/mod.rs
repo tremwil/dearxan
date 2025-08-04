@@ -38,7 +38,7 @@ use pelite::{
     pe::{Pe, PeObject},
     pe64::PeView,
 };
-use windows::{
+use windows_sys::{
     Win32::System::{
         LibraryLoader::GetModuleHandleA,
         Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect},
@@ -310,8 +310,11 @@ mod disabler_debug {
 
 fn game_module() -> PeView<'static> {
     static PE: LazyLock<PeView<'static>> = LazyLock::new(|| unsafe {
-        let hmod = GetModuleHandleA(PCSTR::null()).unwrap();
-        PeView::module(hmod.0 as *const _)
+        let hmod = GetModuleHandleA(std::ptr::null());
+        if hmod.is_null() {
+            panic!("GetModuleHandleA(NULL) failed");
+        }
+        PeView::module(hmod as *const _)
     });
     *PE
 }
@@ -332,14 +335,18 @@ unsafe fn make_module_rwe(pe: PeView<'_>) {
         let len = (rva_range.end - rva_range.start) as usize;
 
         let mut protect = Default::default();
-        unsafe {
+        if 0 == unsafe {
             VirtualProtect(
                 (base + rva_range.start as usize) as *const _,
                 len,
                 PAGE_EXECUTE_READWRITE,
                 &mut protect,
             )
-            .unwrap();
+        } {
+            panic!(
+                "VirtualProtect failed on address {:x} and length {len}",
+                base + rva_range.start as usize
+            );
         }
     }
 }
