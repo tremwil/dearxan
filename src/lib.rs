@@ -2,7 +2,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![doc = include_str!("../README.md")]
 
-#[cfg(all(feature = "disabler", target_os = "windows"))]
+#[cfg(feature = "disabler")]
 pub mod disabler;
 
 pub mod analysis;
