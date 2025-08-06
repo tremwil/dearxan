@@ -49,7 +49,7 @@ jobs:
         id: get_version
         run: |
           $version = python ./.github/scripts/package_version.py
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$env:GITHUB_OUTPUT"
 
       - name: Zip release
         run: Compress-Archive -Path ./target/dist -DestinationPath "dearxan-${{ steps.get_version.outputs.version }}.zip"
