@@ -444,6 +444,7 @@ impl<I: ImageView, D: Clone> ProgramState<I, D> {
     ///
     /// # Panics
     /// If the operand is not a register or memory operand.
+    #[allow(clippy::result_unit_err)]
     pub fn set_operand_value(
         &mut self,
         instr: &Instruction,
