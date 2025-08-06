@@ -8,9 +8,6 @@ pub mod disabler;
 pub mod analysis;
 pub mod patch;
 
-#[cfg(test)]
-mod test_util;
-
 /// Re-export of the `iced_x86` crate.
 #[cfg(feature = "internal_api")]
 pub use iced_x86;

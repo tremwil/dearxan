@@ -1,0 +1,11 @@
+[package]
+name = "dearxan-test-utils"
+description = "Utilities for dearxan's integration tests"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pelite.workspace = true
+log.workspace = true
+simplelog.workspace = true

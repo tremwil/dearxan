@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["test_dll", "test_launcher"]
+members = ["test_dll", "test_launcher", "test_utils"]
 
 [workspace.package]
 authors = ["William Tremblay"]
@@ -11,6 +11,8 @@ repository = "https://github.com/tremwil/dearxan"
 [workspace.dependencies]
 log = "0.4"
 simplelog = "0.12.2"
+clap = { version = "4.5.32", features = ["derive"] }
+pelite = { version = "0.10", default-features = false }
 
 [package]
 name = "dearxan"
@@ -26,12 +28,12 @@ crate-type = ["rlib", "staticlib"]
 [features]
 disabler = ["dep:closure-ffi", "dep:windows-sys"]
 ffi = ["disabler"]
-disabler-debug = ["disabler"]
+instrument_stubs = []
 internal_api = []
 
 [dependencies]
+pelite.workspace = true
 log.workspace = true
-pelite = { version = "0.10", default-features = false }
 iced-x86 = "1.21"
 memchr = "2.7.4"
 fxhash = "0.2.1"
@@ -53,12 +55,14 @@ features = [
 
 [dev-dependencies]
 simplelog.workspace = true
+clap.workspace = true
+clap-num = "1.2"
+dearxan-test-utils = { version = "*", path = "test_utils" }
 iced-x86 = { version = "1.21", features = ["code_asm"] }
 pretty-hex = "0.4.1"
 
 [profile.release]
 opt-level = 3
-codegen-units = 1
 
 [package.metadata.docs.rs]
 features = ["ffi", "disabler-debug", "rayon"]
