@@ -64,6 +64,8 @@ pretty-hex = "0.4.1"
 
 [profile.release]
 opt-level = 3
+codegen-units = 1
+lto = "fat"
 
 [package.metadata.docs.rs]
 features = ["disabler", "internal_api", "ffi"]
