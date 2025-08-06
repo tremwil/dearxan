@@ -12,10 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
 
-      - run: cargo publish -p dearxan-test-utils --dry-run
-      - run: cargo publish --dry-run
+      - run: cargo +nightly -Z package-workspace publish --dry-run -p dearxan,dearxan-test-utils
 
   publish:
     if: github.event_name == 'push'
@@ -26,7 +25,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
 
       - name: Create dist foler
         run: |
@@ -43,11 +42,8 @@ jobs:
           cargo build --release -F ffi
           mv ./target/release/dearxan.lib ./target/dist/lib/dearxan-release.lib
 
-      - name: crates.io publish (test-utils)
-        run: cargo publish -p dearxan-test-utils --token ${{ secrets.CRATES_IO_TOKEN }}
-
       - name: crates.io publish
-        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo +nightly -Z package-workspace publish -p dearxan,dearxan-test-utils --token ${{ secrets.CRATES_IO_TOKEN }}
 
       - name: Get package version
         id: get_version
