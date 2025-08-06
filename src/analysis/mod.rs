@@ -20,7 +20,7 @@ pub mod vm;
 pub use self::{
     encryption::{EncryptedRegion, EncryptedRegionList, shannon_entropy},
     stub_info::{ReturnGadget, StubAnalysisError, StubAnalyzer, StubInfo},
-    vm::ImageView,
+    vm::{ImageView, image::WithBase},
 };
 
 fn find_test_rsp_instructions<'a, I: ImageView>(
