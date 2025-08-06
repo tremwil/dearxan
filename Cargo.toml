@@ -3,7 +3,7 @@ resolver = "2"
 members = ["test_dll", "test_launcher", "test_utils"]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 authors = ["William Tremblay"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
