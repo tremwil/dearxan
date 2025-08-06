@@ -1,22 +1,38 @@
-#[cfg(not(feature = "internal_api"))]
 mod cfg;
-#[cfg(not(feature = "internal_api"))]
 mod encryption;
-#[cfg(not(feature = "internal_api"))]
 mod stub_info;
-#[cfg(not(feature = "internal_api"))]
 mod vm;
 
+/// Internal analysis API.
+///
+/// # Warning
+///
+/// <div class="warning">
+///
+/// Breaking changes to this module are *not* considered as breaking for the purpose of semantic
+/// versioning!
+///
+/// </div>
 #[cfg(feature = "internal_api")]
-pub mod cfg;
-#[cfg(feature = "internal_api")]
-pub mod encryption;
-#[cfg(feature = "internal_api")]
-pub mod stub_info;
-#[cfg(feature = "internal_api")]
-pub mod vm;
+pub mod internal {
+    pub mod cfg {
+        #[doc(inline)]
+        pub use super::super::cfg::*;
+    }
+    pub mod encryption {
+        #[doc(inline)]
+        pub use super::super::encryption::*;
+    }
+    pub mod stub_info {
+        #[doc(inline)]
+        pub use super::super::stub_info::*;
+    }
+    pub mod vm {
+        #[doc(inline)]
+        pub use super::super::vm::*;
+    }
+}
 
-#[doc(inline)]
 pub use self::{
     encryption::{EncryptedRegion, EncryptedRegionList, shannon_entropy},
     stub_info::{ReturnGadget, StubAnalysisError, StubAnalyzer, StubInfo},

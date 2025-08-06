@@ -1,6 +1,6 @@
 use pelite::pe::{Pe, PeView};
 
-/// Trait implemented by types representing an immutable view over a mapped executable image.
+/// Abstraction over an immutable view of a mapped executable image.
 pub trait ImageView: Clone {
     /// The actual base address of the image.
     fn base_va(&self) -> u64;
@@ -87,7 +87,7 @@ pub struct WithBase<T: AsRef<[u8]> + Clone> {
 
 impl<T: AsRef<[u8]> + Clone> WithBase<T> {
     /// Construct a [`WithBase`] from a u8 slice-like type and a base virtual address.
-    #[allow(dead_code)] // Used in tests
+    #[allow(dead_code)] // To be used in tests
     pub fn new(bytes: T, base: u64) -> Self {
         Self { bytes, base }
     }

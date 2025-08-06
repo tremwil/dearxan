@@ -49,6 +49,8 @@ impl CfgInfo {
     }
 }
 
+/// Wrapper attaching the CFG state information required to by the [`ArxanCfgVisitor`] to an
+/// arbitrary type.
 #[derive(Clone, Copy)]
 pub struct ArxanCfgData<D: Clone> {
     #[allow(dead_code)]
@@ -56,7 +58,21 @@ pub struct ArxanCfgData<D: Clone> {
     cfg_info: CfgInfo,
 }
 
-// Information about a possibly-obfuscated call instruction.
+impl<D: Clone> core::ops::Deref for ArxanCfgData<D> {
+    type Target = D;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<D: Clone> core::ops::DerefMut for ArxanCfgData<D> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+/// Information about a possibly-obfuscated call instruction.
 pub struct CallInfo {
     #[allow(dead_code)]
     /// The value of RSP after taking the call.
