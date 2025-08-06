@@ -30,13 +30,13 @@ pub unsafe extern "system" fn DllMain(
                 simplelog::ColorChoice::Auto,
             ),
             simplelog::WriteLogger::new(
-                simplelog::LevelFilter::Trace,
+                simplelog::LevelFilter::Debug,
                 simplelog::Config::default(),
                 File::options()
                     .create(true)
                     .write(true)
                     .truncate(true)
-                    .open("arxan-disabler-dll.log")
+                    .open("test-dearxan-dll.log")
                     .unwrap(),
             ),
         ])
@@ -45,7 +45,7 @@ pub unsafe extern "system" fn DllMain(
         unsafe {
             neuter_arxan(|entry, has_arxan| {
                 log::info!(
-                    "arxan detected: {has_arxan} true entry point: {:x}",
+                    "arxan detected: {has_arxan}. True entry point: {:x}",
                     entry.addr()
                 );
             })

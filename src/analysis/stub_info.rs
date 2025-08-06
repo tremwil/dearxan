@@ -138,11 +138,11 @@ impl<'a> StubScanState<'a> {
 
             let candidate_ctexts = lea_targets.values().filter_map(|&va| image.read(va, 8));
             for ctext in candidate_ctexts {
-                if let Some(regions) = EncryptedRegion::try_decrypt_list(ctext, key_info.key) {
+                if let Some(region_list) = EncryptedRegion::try_decrypt_list(ctext, key_info.key) {
                     self.encryption = EncryptionState::SearchingCiphertext(RegionListInfo {
                         tea_block_decrypt: key_info.tea_block_decrypt,
                         region_list_key_va: key_info.key_va,
-                        encrypted_regions: regions,
+                        encrypted_regions: region_list,
                     });
                     log::trace!("found region list info: {:x?}", self.encryption);
 
@@ -209,7 +209,6 @@ impl<'a> StubScanState<'a> {
         // The first argument is a pointer to an 8-byte block to decrypt in place
         // we try to match its encyrpted value with a static address using the lea map
         // to extract the full ciphertext
-        #[rustfmt::skip]
         let ctext_stack_va = step.state.registers.rcx().filter(|&va| va < self.init_rsp)?;
         let ctext_block = step.state.memory.read_int(ctext_stack_va, 8)?;
         let ctext_va = *self.static_lea_lookup.get(&ctext_block)?;
@@ -235,10 +234,6 @@ impl<'a> StubScanState<'a> {
             if let Some(g) = self.return_gadget.as_ref() {
                 log::trace!("return gadget found: {g:x?}");
             }
-        }
-        #[cfg(test)]
-        if log::max_level() >= log::LevelFilter::Trace {
-            println!("{}", super::vm::util::format_step_state(&step));
         }
 
         // Track pointee values for LEA reg, [rip+...] instructions
@@ -314,14 +309,12 @@ impl std::error::Error for StubAnalysisError {}
 pub struct StubAnalyzer {
     max_steps: usize,
     init_rsp: u64,
+    trace_execution: bool,
 }
 
 impl Default for StubAnalyzer {
     fn default() -> Self {
-        Self {
-            max_steps: 0x100000,
-            init_rsp: 0x10000,
-        }
+        Self::new()
     }
 }
 
@@ -331,6 +324,7 @@ impl StubAnalyzer {
         Self {
             max_steps: 0x100000,
             init_rsp: 0x10000,
+            trace_execution: false,
         }
     }
 
@@ -347,6 +341,14 @@ impl StubAnalyzer {
     /// The default value is 0x10000 (2^16).
     pub fn init_rsp(self, init_rsp: u64) -> Self {
         Self { init_rsp, ..self }
+    }
+
+    /// Logging the visited stub instructions with trace level as they are emulated.
+    pub fn trace_execution(self, trace_execution: bool) -> Self {
+        Self {
+            trace_execution,
+            ..self
+        }
     }
 
     /// Analyze an Arxan stub in the executable image `image` given the virtual address of it's
@@ -373,6 +375,10 @@ impl StubAnalyzer {
             step_count += 1;
             if step_count > self.max_steps {
                 return StepKind::Stop(false);
+            }
+
+            if self.trace_execution {
+                log::trace!("{}", super::vm::util::format_step_state(&step));
             }
 
             scan_state.update(&step);
@@ -406,99 +412,15 @@ impl StubAnalyzer {
             return_gadget: scan_state.return_gadget,
             encrypted_regions: match scan_state.encryption {
                 EncryptionState::SearchingRegions(_) => None,
-                EncryptionState::SearchingCiphertext(regions) => {
-                    log::warn!(
-                        "stub {test_rsp_va:x}: encrypted region list found, but not ciphertext: {regions:x?}"
+                EncryptionState::SearchingCiphertext(list_info) => {
+                    log::debug!(
+                        "stub {test_rsp_va:x}: likely integrity check routine ({} regions)",
+                        list_info.encrypted_regions.len()
                     );
                     None
                 }
-                EncryptionState::Found(regions) => Some(regions),
+                EncryptionState::Found(region_list) => Some(region_list),
             },
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use fxhash::FxHashMap;
-    use memchr::memmem;
-
-    use crate::analysis::{
-        encryption::{EncryptedRegionList, shannon_entropy},
-        stub_info::StubAnalyzer,
-        vm::ImageView,
-    };
-    use crate::test_util::{init_log, latest_fsbins};
-
-    #[test]
-    fn all_stub_info_found() {
-        init_log(log::LevelFilter::Debug);
-
-        latest_fsbins()
-            .iter()
-            .filter(|f| f.game == "ac6")
-            .filter_map(|f| f.load_64().ok())
-            .for_each(|exe| {
-                let game = exe.game();
-                let ver = exe.ver();
-                let pe = exe.pe_view();
-                // SAFETY: Backing memory of the view is a vector, all bytes in the slice are valid
-                let test_rsp_vas: Vec<_> = pe
-                    .sections()
-                    .flat_map(|(va, b)| {
-                        memmem::find_iter(b, b"\x48\xf7\xc4\x0f\x00\x00\x00")
-                            .map(move |o| va + o as u64)
-                    })
-                    .collect();
-
-                log::info!("[{game} v{ver}] found {} arxan stubs", test_rsp_vas.len());
-
-                let mut region_list_pairs: FxHashMap<u32, Vec<EncryptedRegionList>> =
-                    FxHashMap::default();
-
-                for (i, &test_rsp_va) in test_rsp_vas.iter().enumerate() {
-                    let stub_info = StubAnalyzer::new().analyze(&pe, test_rsp_va);
-                    match stub_info {
-                        Ok(stub_info) => {
-                            log::debug!("[{game} v{ver}] {test_rsp_va:x} (#{i:04}) -> OK");
-
-                            if let Some(decrypted) = stub_info.encrypted_regions {
-                                if decrypted.decrypted_stream.len() == 0 {
-                                    log::warn!("empty decrypted stream!");
-                                    continue;
-                                }
-
-                                region_list_pairs
-                                    .entry(decrypted.regions.first().unwrap().rva)
-                                    .or_default()
-                                    .push(decrypted);
-                            }
-                        }
-                        Err(err) => log::warn!(
-                            "[{game} v{ver}] stub info not found for {test_rsp_va:x} (#{i}): {err}"
-                        ),
-                    }
-                }
-
-                println!("\n\n");
-                for (first_rva, regions) in region_list_pairs.iter() {
-                    log::info!("rva: {first_rva:016x} #routines: {}", regions.len());
-                    for region in regions.iter() {
-                        let entropy = shannon_entropy(&region.decrypted_stream);
-                        let trimmed_stream = pretty_hex::pretty_hex(
-                            &region
-                                .decrypted_stream
-                                .get(..0x100)
-                                .unwrap_or(&region.decrypted_stream),
-                        );
-                        log::info!(
-                            " - length = {} entropy = {:.03} stream[..0x100]: {}",
-                            region.decrypted_stream.len(),
-                            entropy,
-                            trimmed_stream
-                        );
-                    }
-                }
-            });
     }
 }

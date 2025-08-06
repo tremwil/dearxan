@@ -53,7 +53,7 @@ struct CliArgs {
         action = clap::ArgAction::SetTrue,
         help = "Wait for user input before resuming the game process."
     )]
-    interactive: bool,
+    wait_for_input: bool,
 
     #[arg(
         long,
@@ -68,6 +68,9 @@ struct CliArgs {
         help = "Optionally override the appid given to the game on launch."
     )]
     env_app_id: Option<u32>,
+
+    #[arg(short, long, help = "Instrument Arxan stub invocations")]
+    instrument_stubs: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -99,13 +102,21 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Don't match the EAC launcher
     let start_protected_game = Some(OsStr::new("start_protected_game"));
-    let game_path = WalkDir::new(game_lib.resolve_app_dir(&game_app))
+    let game_folder = game_lib.resolve_app_dir(&game_app);
+    let game_path = WalkDir::new(&game_folder)
         .max_depth(2)
         .into_iter()
         .filter_map(|f| f.ok())
         .find(|f| {
-            f.path().extension() == Some(OsStr::new("exe"))
-                && f.path().file_stem() != start_protected_game
+            let Some(parent) = f.path().parent()
+            else {
+                return false;
+            };
+            let correct_folder =
+                parent.file_name() == Some(OsStr::new("Game")) || parent == game_folder;
+            let is_exe = f.path().extension() == Some(OsStr::new("exe"));
+            let is_eac_launcher = f.path().file_name() == start_protected_game;
+            correct_folder && is_exe && !is_eac_launcher
         })
         .ok_or("Failed to find game launcher")?
         .path()
@@ -117,11 +128,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let game_dir_cstr = CString::new(game_dir.as_os_str().to_str().unwrap())?;
 
     let dll_path = if !args.no_inject {
-        std::process::Command::new("cargo")
-            .args(["build", "--release", "-p", "arxan-disabler-dll"])
-            .status()?;
+        let mut build_args = vec!["build", "--release", "-p", "dearxan-test-dll"];
+        if args.instrument_stubs {
+            build_args.extend_from_slice(&["-F", "instrument_stubs"]);
+        }
+        std::process::Command::new("cargo").args(build_args).status()?;
 
-        let dll_path = current_dir()?.join("target").join("release").join("arxan_disabler_dll.dll");
+        let dll_path = current_dir()?.join("target").join("release").join("dearxan_test_dll.dll");
 
         log::info!("DLL path: {}", dll_path.display());
         Some(dll_path)
@@ -177,7 +190,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::thread::sleep(Duration::from_secs_f64(delay));
     }
 
-    if args.interactive {
+    if args.wait_for_input {
         log::info!("Press enter to resume process. Output will appear below.");
         let _ = std::io::stdin().read_line(&mut String::new());
     }

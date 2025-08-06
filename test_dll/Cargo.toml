@@ -11,10 +11,13 @@ crate-type = ["cdylib"]
 log.workspace = true
 simplelog.workspace = true
 
+[features]
+instrument_stubs = ["dearxan/instrument_stubs"]
+
 [dependencies.dearxan]
 version = "*"
 path = ".."
-features = ["rayon", "disabler-debug"]
+features = ["disabler", "rayon"]
 
 [dependencies.windows]
 version = "0.61"
@@ -23,3 +26,7 @@ features = [
     "Win32_System_LibraryLoader",
     "Win32_System_SystemServices",
 ]
+
+[profile.release]
+opt-level = 3
+debug = "full"
