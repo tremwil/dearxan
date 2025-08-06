@@ -132,6 +132,8 @@ pub struct EncryptedRegion {
 impl EncryptedRegion {
     /// Return the decrypted slice of bytes corresponding to this region, borrowing the bytes
     /// from its parent [`EncryptedRegionList`].
+    ///
+    /// Will always return [`Some`] if `list` is the actual parent.
     pub fn decrypted_slice<'a>(&self, list: &'a EncryptedRegionList) -> Option<&'a [u8]> {
         list.decrypted_stream.get(self.stream_offset..self.stream_offset + self.size)
     }
@@ -202,6 +204,13 @@ pub struct EncryptedRegionList {
 }
 
 impl EncryptedRegionList {
+    /// Return the number of encrypted regions in this list.
+    ///
+    /// Shorthand for `self.regions.len()`.
+    pub fn len(&self) -> usize {
+        self.regions.len()
+    }
+
     pub fn try_new(
         regions: Vec<EncryptedRegion>,
         mut ciphertext: impl Read,

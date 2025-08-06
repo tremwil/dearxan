@@ -27,6 +27,8 @@ pub enum PatchGenError {
     AssemblerError(AssemblerErrorInner),
     /// The patch would be writing to memory outside of the executable image.
     OutOfBounds { rva: usize, size: usize },
+    /// The executable image's .reloc section is required but could not be read.
+    RelocsCorrupted,
 }
 
 impl From<IcedError> for PatchGenError {
@@ -47,6 +49,9 @@ impl std::fmt::Display for PatchGenError {
                     "write of {size} bytes to RVA 0x{rva:x} is not within the executable image"
                 )
             }
+            Self::RelocsCorrupted => {
+                write!(f, ".relocs section is corrupted and could not be read")
+            }
         }
     }
 }
@@ -54,9 +59,16 @@ impl std::fmt::Display for PatchGenError {
 impl std::error::Error for PatchGenError {}
 
 impl ArxanPatch {
-    /// Generate
-    pub fn from_stubs<'a, I: ImageView>(
+    /// Generate the required patches to disable Arxan given `analyzed_stubs` extracted from
+    /// the executable image `image`, e.g. through
+    /// [`analyze_all_stubs`](super::analysis::analyze_all_stubs)
+    ///
+    /// If `image` was mapped at a different address to its preferred base address,
+    /// relocations may need to be applied to some of the patches. In that case `preferred_base`
+    /// must be provided.
+    pub fn build_from_stubs<'a, I: ImageView>(
         image: I,
+        preferred_base: Option<u64>,
         analyzed_stubs: impl IntoIterator<Item = &'a StubInfo>,
     ) -> Result<Vec<Self>, PatchGenError> {
         let analyzed_stubs = analyzed_stubs.into_iter();
@@ -78,14 +90,16 @@ impl ArxanPatch {
             })
         }
 
-        let base = image.base_va();
+        let actual_base = image.base_va();
+        let mut writes = Vec::with_capacity(decrypt_conflicts.len());
+
         for conflicts in decrypt_conflicts.values() {
             // Get the region list that doesn't match existing bytes with the lowest Shannon entropy
             let Some(&rlist) = conflicts
                 .into_iter()
                 .filter(|rlist| {
                     rlist.regions.first().is_some_and(|r| {
-                        image.read(base + r.rva as u64, r.size) != r.decrypted_slice(rlist)
+                        image.read(actual_base + r.rva as u64, r.size) != r.decrypted_slice(rlist)
                     })
                 })
                 .min_by_key(|r| (shannon_entropy(&r.decrypted_stream) * 10e6) as i64)
@@ -93,19 +107,64 @@ impl ArxanPatch {
                 continue;
             };
             // Make sure that all regions in the list are within the image
-            if let Some(r) =
-                rlist.regions.iter().find(|r| image.read(base + r.rva as u64, r.size).is_none())
+            if let Some(r) = rlist
+                .regions
+                .iter()
+                .find(|r| image.read(actual_base + r.rva as u64, r.size).is_none())
             {
                 return Err(PatchGenError::OutOfBounds {
                     rva: r.rva as usize,
                     size: r.size,
                 });
             }
-            patches.extend(rlist.regions.iter().map(|r| ArxanPatch::Write {
-                va: base + r.rva as u64,
-                bytes: r.decrypted_slice(rlist).unwrap().to_owned(),
-            }))
+            // Collect all contiguous writes together
+            writes.extend(
+                rlist
+                    .regions
+                    .iter()
+                    .map(|r| (r.rva, r.decrypted_slice(rlist).unwrap().to_owned())),
+            );
         }
+
+        // Handle relocs to decrypted regions, if necessary
+        match preferred_base {
+            Some(preferred) /* if preferred != actual_base */ => {
+                // Use a mergesort like pass to match regions with their relocs
+                writes.sort_by_key(|(rva, _)| *rva);
+
+                // Usually, PE relocs are in the right order, but we don't guarantee this
+                let mut relocs: Vec<_> =
+                    image.relocs64().map_err(|_| PatchGenError::RelocsCorrupted)?.collect();
+                relocs.sort();
+
+                let reloc_offset = actual_base.wrapping_sub(preferred);
+                let mut i_reloc = relocs.into_iter().peekable();
+                for (rva, mut bytes) in writes {
+                    while let Some(reloc) = i_reloc.next_if(|r| r + 8 <= rva + bytes.len() as u32) {
+                        let Some(offset) = reloc.checked_sub(rva).map(|r| r as usize)
+                        else {
+                            continue;
+                        };
+                        let target_bytes = &mut bytes[offset..offset + 8];
+                        let target: u64 = bytemuck::pod_read_unaligned(target_bytes);
+                        let adjusted = target.wrapping_add(reloc_offset);
+                        target_bytes.copy_from_slice(bytemuck::bytes_of(&adjusted));
+                        log::trace!("applied reloc at {:x} (in patch at rva {:x})", reloc, rva)
+                    }
+                    patches.push(ArxanPatch::Write {
+                        va: actual_base + rva as u64,
+                        bytes,
+                    })
+                }
+            }
+            _ => patches.extend(writes.into_iter().map(|(rva, bytes)| ArxanPatch::Write {
+                va: actual_base + rva as u64,
+                bytes,
+            })),
+        }
+
+        // Create a write patch for every reloc in the exe
+        // TODO: Use a mergesort like algorithm to intersect decrypted regions and relocs
 
         Ok(patches)
     }
@@ -122,14 +181,14 @@ fn assemble_stub_patch(stub: &StubInfo) -> Result<Vec<u8>, IcedError> {
         // Will point to the our own return gadget
         let ret_stub_ref = MemoryOperand::with_base_displ(RIP, 1);
         instructions.extend([
-            Instruction::with2(Code::Mov_r64_rm64, RAX, ret_stub_ref)?,
+            Instruction::with2(Code::Lea_r64_m, RAX, ret_stub_ref)?,
             Instruction::with2(Code::Mov_rm64_r64, rg_low, RAX)?,
         ]);
     }
 
     // Adjust stack and jump to context restore
     instructions.extend([
-        Instruction::with2(Code::Add_rm64_imm8, RSP, 8)?,
+        Instruction::with2(Code::Sub_rm64_imm8, RSP, 8)?,
         Instruction::with2(Code::Mov_r64_imm64, RAX, stub.context_pop_va)?,
         Instruction::with1(Code::Jmp_rm64, RAX)?,
     ]);

@@ -6,7 +6,6 @@ use std::{
 };
 
 use closure_ffi::{JitAlloc, JitAllocError};
-use pelite::util::AlignTo;
 use windows_sys::Win32::System::{
     Memory::{
         MEM_COMMIT, MEM_FREE, MEM_RELEASE, MEM_RESERVE, MEMORY_BASIC_INFORMATION,
@@ -37,7 +36,7 @@ impl CodeBuffer {
 
         // compute lowest possible allocation address (note that the first block cannot be
         // allocated)
-        let lowest_base = (region.end.saturating_sub(max_sep).max(gran) + gran - 1).align_to(gran);
+        let lowest_base = region.end.saturating_sub(max_sep).max(gran).next_multiple_of(gran);
 
         // Search free region closest to target module to allocate our hook memory at,
         // starting at lowest possible address that admits a REL32 jmp
@@ -51,8 +50,8 @@ impl CodeBuffer {
             ) != 0
         } {
             // Compute portion of block that is aligned to allocation boundaries
-            let block_start = (minfo.BaseAddress as usize + gran - 1).align_to(gran);
-            let block_end = (minfo.BaseAddress as usize + minfo.RegionSize).align_to(gran);
+            let block_start = (minfo.BaseAddress as usize).next_multiple_of(gran);
+            let block_end = (minfo.BaseAddress as usize + minfo.RegionSize) & !(gran - 1);
             let block_size = block_end - block_start;
 
             // block end would be too far from region start

@@ -36,7 +36,7 @@ use pelite::{
     pe64::PeView,
 };
 
-use super::{call_hook::CallHook, game_code_buffer, game_module};
+use super::{call_hook::CallHook, game::game};
 
 /// Takes PE entry point and returns original entry point.
 pub type SteamStub31Main = unsafe extern "C" fn(u64) -> u64;
@@ -105,12 +105,12 @@ pub unsafe fn schedule_after_steamstub(callback: impl FnOnce(*const u8, bool) + 
         panic!("schedule_after_steamstub must not be called more than once");
     }
 
-    let pe = game_module();
-    let base = pe.optional_header().ImageBase;
-    let opt_header = pe.optional_header();
+    let game = game();
+    let base = game.pe.optional_header().ImageBase;
+    let opt_header = game.pe.optional_header();
     let entry_point = opt_header.ImageBase + opt_header.AddressOfEntryPoint as u64;
 
-    let Some((call_ptr, _)) = find_steamstub31_main(pe)
+    let Some((call_ptr, _)) = find_steamstub31_main(game.pe)
     else {
         log::debug!("SteamStub not detected, running callback immediately");
         callback(entry_point as *const _, false);
@@ -154,7 +154,7 @@ pub unsafe fn schedule_after_steamstub(callback: impl FnOnce(*const u8, bool) + 
             callback(original_entry as *const _, true);
             original_entry
         },
-        game_code_buffer(),
+        &game.hook_buffer,
     );
 
     unsafe { call_hook.hook_with(hook.leak()) };
@@ -166,7 +166,7 @@ unsafe fn peb_being_debugged_flag<'a>() -> &'a AtomicBool {
         std::arch::asm!(
             "mov {reg}, qword ptr GS:[0x30]",
             "mov {reg}, qword ptr [{reg} + 0x60]",
-            "lea {reg} [{reg} + 0x2]",
+            "lea {reg}, [{reg} + 0x2]",
             reg = out(reg) ptr
         );
         AtomicBool::from_ptr(ptr)

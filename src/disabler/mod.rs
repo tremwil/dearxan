@@ -28,9 +28,9 @@
 //! If the `disabler-debug` feature is enabled, patched Arxan stubs will log their first
 //! execution with the [`log::Level::Trace`] severity.
 
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
-use std::{io::Write, sync::LazyLock};
 
 use call_hook::CallHook;
 use closure_ffi::BareFnOnce;
@@ -38,18 +38,17 @@ use pelite::{
     pe::{Pe, PeObject},
     pe64::PeView,
 };
-use windows_sys::Win32::System::{
-    LibraryLoader::GetModuleHandleA,
-    Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect},
-};
+use windows_sys::Win32::System::Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect};
 
 use crate::patch::ArxanPatch;
 
 mod call_hook;
 mod code_buffer;
+mod game;
 mod steamstub;
 
 use code_buffer::CodeBuffer;
+use game::game;
 pub use steamstub::schedule_after_steamstub;
 
 /// Single function to neuter all of Arxan's checks.
@@ -91,16 +90,13 @@ where
                 return;
             }
 
-            log::debug!("setting game image protection flags to RWE");
-
-            let pe = game_module();
-
-            make_module_rwe(pe);
+            let game = game();
+            make_module_rwe(game.pe);
 
             let analysis_time = Instant::now();
             log::info!("analyzing Arxan stubs");
 
-            let analysis_results = crate::analysis::analyze_all_stubs(pe);
+            let analysis_results = crate::analysis::analyze_all_stubs(game.pe);
             let num_found = analysis_results.len();
             log::info!(
                 "analysis completed in {:.3?}. {} stubs found",
@@ -119,8 +115,12 @@ where
 
             log::info!("generating patches");
             let patch_gen_time = Instant::now();
-            let patches = crate::patch::ArxanPatch::from_stubs(pe, good_stubs.iter())
-                .expect("failed to generate patches for all stubs");
+            let patches = crate::patch::ArxanPatch::build_from_stubs(
+                game.pe,
+                Some(game.preferred_base),
+                good_stubs.iter(),
+            )
+            .expect("failed to generate patches for all stubs");
 
             log::info!(
                 "generated {} patches in {:.3?}",
@@ -130,9 +130,8 @@ where
 
             log::info!("applying patches");
             let patch_apply_time = Instant::now();
-            let code_buffer = game_code_buffer();
             for patch in &patches {
-                apply_patch(patch, code_buffer);
+                apply_patch(patch, &game.hook_buffer);
             }
             log::info!(
                 "all patches applied in {:3?}. Arxan is now neutered",
@@ -194,12 +193,13 @@ where
                 move || {
                     log::debug!("removing Arxan entry point hook");
                     arxan_stub_hook.unhook();
+                    // TODO: Fully reverse the entry point so this is not necessary
                     log::debug!("running Arxan entry point stub");
                     arxan_stub_hook.original()();
                     log::debug!("running callback function");
                     callback(game_entry, true)
                 },
-                game_code_buffer(),
+                &game().hook_buffer,
             );
 
             log::debug!("detouring Arxan entry point stub");
@@ -241,13 +241,13 @@ pub unsafe fn is_arxan_entry(entry_point: *const u8) -> Option<*const u8> {
 unsafe fn apply_patch(patch: &ArxanPatch, code_buf: &CodeBuffer) {
     match patch {
         ArxanPatch::JmpHook { target, pic } => {
-            #[cfg(feature = "disabler-debug")]
-            let instrumented: Vec<_> = disabler_debug::emit_log_call(*target)
+            #[cfg(feature = "instrument_stubs")]
+            let instrumented: Vec<_> = stub_instrumentation::emit_log_call(*target)
                 .unwrap()
                 .into_iter()
                 .chain(pic.iter().copied())
                 .collect();
-            #[cfg(feature = "disabler-debug")]
+            #[cfg(feature = "instrument_stubs")]
             let pic = &instrumented;
 
             let hook = code_buf.write(&pic).unwrap().addr() as i64;
@@ -257,24 +257,26 @@ unsafe fn apply_patch(patch: &ArxanPatch, code_buf: &CodeBuffer) {
             hook_site.write(&[0xE9]).unwrap();
             hook_site.write(&jmp_immediate.to_le_bytes()).unwrap();
 
-            log::debug!("patched arxan stub at {:016x}", *target);
+            log::trace!("patched arxan stub at {:016x}", *target);
         }
         ArxanPatch::Write { va, bytes } => {
             unsafe {
                 core::ptr::copy_nonoverlapping(bytes.as_ptr(), *va as *mut u8, bytes.len());
             }
-            log::debug!("wrote {} bytes to {va:x}", bytes.len())
+            log::trace!("wrote {} bytes to {va:x}", bytes.len())
         }
     }
 }
 
-#[cfg(feature = "disabler-debug")]
-mod disabler_debug {
+#[cfg(feature = "instrument_stubs")]
+mod stub_instrumentation {
+    use std::option::Option::None;
     use std::sync::Mutex;
 
     use fxhash::FxHashSet;
     use iced_x86::{
-        BlockEncoder, BlockEncoderOptions, Code, IcedError, Instruction, InstructionBlock, Register,
+        BlockEncoder, BlockEncoderOptions, Code, IcedError, Instruction, InstructionBlock,
+        MemoryOperand, Register::*,
     };
 
     unsafe extern "C" fn log_arxan_stub(hook_addr: u64, rsp: u64) {
@@ -287,14 +289,18 @@ mod disabler_debug {
 
     pub fn emit_log_call(hook_addr: u64) -> Result<Vec<u8>, IcedError> {
         let log_stub_instructions = [
-            Instruction::with2(Code::Mov_r64_rm64, Register::RSI, Register::RSP)?,
-            Instruction::with2(Code::And_rm64_imm8, Register::RSP, -0x10i64)?,
-            Instruction::with2(Code::Sub_rm64_imm8, Register::RSP, 0x30)?,
-            Instruction::with2(Code::Mov_r64_imm64, Register::RCX, hook_addr)?,
-            Instruction::with2(Code::Mov_r64_rm64, Register::RDX, Register::RSI)?,
-            Instruction::with2(Code::Mov_r64_imm64, Register::RAX, log_arxan_stub as u64)?,
-            Instruction::with1(Code::Call_rm64, Register::RAX)?,
-            Instruction::with2(Code::Mov_r64_rm64, Register::RSP, Register::RSI)?,
+            Instruction::with2(Code::Mov_r64_rm64, RDX, RSP)?,
+            Instruction::with2(Code::And_rm64_imm8, RSP, -0x10i64)?,
+            Instruction::with1(Code::Push_rm64, RDX)?,
+            Instruction::with2(Code::Sub_rm64_imm8, RSP, 0x28)?,
+            Instruction::with2(Code::Mov_r64_imm64, RCX, hook_addr)?,
+            Instruction::with2(Code::Mov_r64_imm64, RAX, log_arxan_stub as u64)?,
+            Instruction::with1(Code::Call_rm64, RAX)?,
+            Instruction::with2(
+                Code::Mov_r64_rm64,
+                RSP,
+                MemoryOperand::with_base_displ(RSP, 0x28),
+            )?,
         ];
         let encoded = BlockEncoder::encode(
             64,
@@ -303,24 +309,6 @@ mod disabler_debug {
         )?;
         Ok(encoded.code_buffer)
     }
-}
-
-fn game_module() -> PeView<'static> {
-    static PE: LazyLock<PeView<'static>> = LazyLock::new(|| unsafe {
-        let hmod = GetModuleHandleA(std::ptr::null());
-        if hmod.is_null() {
-            panic!("GetModuleHandleA(NULL) failed");
-        }
-        PeView::module(hmod as *const _)
-    });
-    *PE
-}
-
-fn game_code_buffer() -> &'static CodeBuffer {
-    static BUF: LazyLock<CodeBuffer> = LazyLock::new(|| {
-        CodeBuffer::alloc_near(game_module().image().as_ptr_range(), 0x100_0000, 1 << 31).unwrap()
-    });
-    &BUF
 }
 
 unsafe fn make_module_rwe(pe: PeView<'_>) {

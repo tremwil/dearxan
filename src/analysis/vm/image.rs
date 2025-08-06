@@ -1,10 +1,17 @@
+use pelite::pe::{Pe, PeView};
+
 /// Trait implemented by types representing an immutable view over a mapped executable image.
 pub trait ImageView: Clone {
-    /// The base address of the image.
+    /// The actual base address of the image.
     fn base_va(&self) -> u64;
 
     /// Iterate over the virtual address and bytes of each section of the image.
     fn sections(&self) -> impl Iterator<Item = (u64, &[u8])>;
+
+    /// Iterate over the RVAs of all 64-bit relative relocations of the image.
+    ///
+    /// May fail with an opaque error if the relocations section of the image is corrupted.
+    fn relocs64(&self) -> Result<impl Iterator<Item = u32>, ()>;
 
     /// Attempt to read at least `min_size` bytes at the virtual address `va`.
     ///
@@ -22,14 +29,18 @@ impl<'a, I: ImageView> ImageView for &'a I {
         (*self).sections()
     }
 
+    fn relocs64(&self) -> Result<impl Iterator<Item = u32>, ()> {
+        (*self).relocs64()
+    }
+
     fn read(&self, va: u64, min_size: usize) -> Option<&[u8]> {
         (*self).read(va, min_size)
     }
 }
 
-impl ImageView for pelite::pe64::PeView<'_> {
+impl ImageView for PeView<'_> {
     fn base_va(&self) -> u64 {
-        pelite::pe64::Pe::optional_header(*self).ImageBase
+        Pe::optional_header(*self).ImageBase
     }
 
     fn sections(&self) -> impl Iterator<Item = (u64, &[u8])> {
@@ -39,6 +50,23 @@ impl ImageView for pelite::pe64::PeView<'_> {
                 .ok()
                 .map(|slice| (self.base_va() + s.VirtualAddress as u64, slice))
         })
+    }
+
+    fn relocs64(&self) -> Result<impl Iterator<Item = u32>, ()> {
+        let maybe_relocs = match self.base_relocs() {
+            Ok(relocs) => Some(relocs),
+            Err(pelite::Error::Null) => None,
+            Err(_) => return Err(()),
+        };
+        Ok(maybe_relocs
+            .into_iter()
+            .flat_map(|relocs| relocs.iter_blocks())
+            .flat_map(|block| {
+                block.words().into_iter().filter_map(move |w| {
+                    // IMAGE_REL_BASED_DIR64 = 10
+                    (block.type_of(w) == 10).then(|| block.rva_of(w))
+                })
+            }))
     }
 
     fn read(&self, va: u64, min_size: usize) -> Option<&[u8]> {
@@ -72,6 +100,10 @@ impl<T: AsRef<[u8]> + Clone> ImageView for WithBase<T> {
 
     fn sections(&self) -> impl Iterator<Item = (u64, &[u8])> {
         std::iter::once((self.base, self.bytes.as_ref()))
+    }
+
+    fn relocs64(&self) -> Result<impl Iterator<Item = u32>, ()> {
+        Ok(std::iter::empty())
     }
 
     fn read(&self, va: u64, min_size: usize) -> Option<&[u8]> {
