@@ -22,7 +22,9 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 repository.workspace = true
-description = "Static analysis and patcher for the Arxan obfuscator as found in FromSoftware titles"
+description = "Static analyzer and patcher for the Arxan anti-debug/DRM as found in FromSoftware titles"
+keywords = ["arxan", "guardit", "reverse-engineering", "modding", "fromsoftware"]
+categories = ["security"]
 
 [lib]
 crate-type = ["rlib", "staticlib"]
