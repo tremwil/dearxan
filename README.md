@@ -13,14 +13,14 @@ Note that this crate is only tested against the variants of Arxan present in Fro
 ## From Rust, using the `disabler` feature
 
 Add the following to your `Cargo.toml`:
-```
+```toml
 dearxan = "0.1.0"
 ```
 
 Then, simply call the `dearxan::disabler::neuter_arxan` function once before the entry point of the game is executed: 
 ```rust,
 unsafe fn runs_before_entry_point() {
-    use arxan_disabler::disabler::neuter_arxan;
+    use dearxan::disabler::neuter_arxan;
 
     neuter_arxan(|original_entry_point, arxan_is_present| {
         println!("Arxan disabled!");

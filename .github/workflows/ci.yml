@@ -1,0 +1,67 @@
+name: Checks
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches-ignore: [main]
+
+jobs:
+  clippy:
+    name: cargo clippy
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: RUSTFLAGS="-Dwarnings" cargo clippy --workspace --all-targets --all-features
+
+  rustfmt:
+    name: cargo fmt
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo fmt --all
+
+  rustdoc:
+    name: cargo doc
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo doc --all-features
+
+  test_stable:
+    name: build and test dearxan library on stable
+
+    runs-on: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p dearxan --all-features
+  
+  test_nightly:
+    name: build and test all utilities on nightly
+
+    runs-on: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo test --workspace --all-features
+
+  all_checks_pass:
+      needs:
+        - rustfmt
+        - rustdoc
+        - clippy
+        - test_stable
+        - test_nightly
+
+      runs-on: ubuntu-latest
+      steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
