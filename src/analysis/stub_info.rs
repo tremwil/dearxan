@@ -404,11 +404,24 @@ impl StubAnalyzer {
             log::trace!("stub {test_rsp_va:x} required a full visit");
         }
 
+        let context_pop_va = match scan_state.context_pop_va {
+            Some(va)
+                // Check if first instruction is a JMP REL32 or an add rsp, [rsp+8] instruction 
+                if image.read(va, 5).is_some_and(|add_rsp_bytes| {
+                    add_rsp_bytes[0] == 0xe9 || &add_rsp_bytes[..5] == b"\x48\x03\x64\x24\x08"
+                }) =>
+            {
+                va
+            }
+            _ => {
+                log::debug!("{test_rsp_va:x} is not in an Arxan stub");
+                return Err(StubAnalysisError::NotAStub(test_rsp_va))
+            }
+        };
+
         Ok(StubInfo {
             test_rsp_va,
-            context_pop_va: scan_state
-                .context_pop_va
-                .ok_or(StubAnalysisError::ContextPopNotFound(test_rsp_va))?,
+            context_pop_va,
             return_gadget: scan_state.return_gadget,
             encrypted_regions: match scan_state.encryption {
                 EncryptionState::SearchingRegions(_) => None,
