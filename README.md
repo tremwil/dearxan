@@ -6,7 +6,15 @@ It is currently able to fully[^1] neuter Arxan in all the FromSoftware games usi
 
 [^1]: This is not quite true at the moment, since we still have to let the Arxan entry point stubs run. This is not really a problem as the entry point stub does not  However, once they are fully reverse engineered it will be possible to skip this too.
 
-Note that this crate is only tested against the variants of Arxan present in FromSoftware games. It may not work with the Arxan configurations used by other game developers. That said, contributions are welcome.
+Note that this crate is only tested against the variants of Arxan present in the latest versions FromSoftware games, which is all of the following:
+- Dark Souls Remastered
+- Dark Souls II SOTFS
+- Dark Souls III
+- Elden Ring
+- Armored Core VI
+- Elden Ring: Nightreign
+
+It may not work with the Arxan configurations used by other game developers. That said, contributions are welcome.
 
 # Usage
 
