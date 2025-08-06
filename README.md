@@ -63,3 +63,4 @@ The crate comes with the following feature flags:
 - `rayon` (default): Parallelizes Arxan stub analysis using the `rayon` crate.
 - `ffi`: Exports a C function `dearxan_neuter_arxan` to use the Arxan disabler from another language.
 - `instrument_stubs`: Adds upon `disabler` by instrumenting each Arxan stub to log a message the first time it is called. **CAREFUL**: This feature currently crashes for games other than Dark Souls Remastered due to register clobbering! 
+- `internal_api`: Make most of the internal binary analysis APIs public through `dearxan::analysis::internal`. These APIs are *not* stabilized yet and may break between minor crate versions.
