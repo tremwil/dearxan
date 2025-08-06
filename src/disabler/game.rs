@@ -1,5 +1,3 @@
-use std::{ffi::OsString, io::Read, os::windows::ffi::OsStringExt, sync::LazyLock};
-
 use pelite::pe64::{
     PeObject, PeView,
     image::{IMAGE_DOS_HEADER, IMAGE_NT_HEADERS64},
@@ -14,7 +12,10 @@ pub struct CurrentGame {
     pub hook_buffer: CodeBuffer,
 }
 
+#[cfg(target_os = "windows")]
 pub fn game() -> &'static CurrentGame {
+    use std::{ffi::OsString, io::Read, os::windows::ffi::OsStringExt, sync::LazyLock};
+
     static GAME: LazyLock<CurrentGame> = LazyLock::new(|| unsafe {
         let handle = GetModuleHandleW(std::ptr::null());
         if handle.is_null() {
@@ -59,4 +60,10 @@ pub fn game() -> &'static CurrentGame {
         }
     });
     &GAME
+}
+
+// Hack to get docs-rs (which runs on linux only) to build the disabler module
+#[cfg(not(target_os = "windows"))]
+pub fn game() -> &'static CurrentGame {
+    unimplemented!("unsupported platform")
 }
