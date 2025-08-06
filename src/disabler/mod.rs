@@ -289,6 +289,7 @@ mod stub_instrumentation {
     }
 
     pub fn emit_log_call(hook_addr: u64) -> Result<Vec<u8>, IcedError> {
+        #[allow(clippy::fn_to_numeric_cast)]
         let log_stub_instructions = [
             Instruction::with2(Code::Mov_r64_rm64, RDX, RSP)?,
             Instruction::with2(Code::And_rm64_imm8, RSP, -0x10i64)?,
