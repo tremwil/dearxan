@@ -1,4 +1,4 @@
-use pelite::pe::{Pe, PeView};
+use pelite::pe64::{Pe, PeView};
 
 /// Opaque error type returned by [`ImageView::relocs64`] when image relocations cannot be read.
 #[derive(Debug, Clone, Copy)]

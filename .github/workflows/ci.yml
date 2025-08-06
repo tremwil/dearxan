@@ -9,11 +9,15 @@ jobs:
   clippy:
     name: cargo clippy
 
-    runs-on: ubuntu-latest
+    runs-on: windows
+    env:
+      RUSTFLAGS: "-Dwarnings"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: RUSTFLAGS="-Dwarnings" cargo clippy --workspace --all-targets --all-features
+        with:
+          components: clippy
+      - run: cargo clippy --workspace --all-targets --all-features
 
   rustfmt:
     name: cargo fmt
@@ -22,6 +26,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
       - run: cargo fmt --all
 
   rustdoc:
