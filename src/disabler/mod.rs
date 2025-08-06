@@ -1,8 +1,4 @@
-//! Provides utilities for disabling Arxan in various FromSoftware games.
-//!
-//! Disablers implement the [`ArxanDisabler`] trait and are prefixed by the game acronym
-//! (e.g. [`DSRArxanDisabler`]). Integration with a DLL mod is very simple and only requires
-//! an [`ArxanDisabler::disable`] call to be made **before** the game's entry point is called.
+//! Provides utilities for neutering Arxan.
 //!
 //! <div class="warning">
 //! Many DLL injectors or mod launchers do not suspend the process upon creation or otherwise
@@ -10,17 +6,19 @@
 //! are used with this module, the game will likely crash.
 //! </div>
 //!
-//! Example usage for Dark Souls Remastered:
+//! Example usage:
 //! ```no_run
-//! use arxan_disabler::disabler::{ArxanDisabler, DSRArxanDisabler};
+//! use dearxan::disabler::neuter_arxan;
 //!
 //! unsafe fn my_entry_point() {
-//!     DSRArxanDisabler::disable(|| {
-//!         println!("Arxan disabled!");
-//!         // This is a good place to do your hooks.
-//!         // Once this callback returns, the game's true entry point
-//!         // will be invoked.
-//!     });
+//!     unsafe {
+//!         neuter_arxan(|original_entry_point, arxan_was_present| {
+//!             println!("Arxan disabled!");
+//!             // This is a good place to do your hooks.
+//!             // Once this callback returns, the game's true entry point
+//!             // will be invoked.
+//!         });
+//!     }
 //! }
 //! ```
 //!
@@ -46,6 +44,9 @@ mod call_hook;
 mod code_buffer;
 mod game;
 mod steamstub;
+
+#[cfg(feature = "ffi")]
+pub mod ffi;
 
 use code_buffer::CodeBuffer;
 use game::game;
