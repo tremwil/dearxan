@@ -199,7 +199,7 @@ impl<I: ImageView> MemoryStore<I> {
         )
     }
 
-    fn get_block(&self, i_block: usize) -> Option<Cow<MemoryBlock>> {
+    fn get_block(&self, i_block: usize) -> Option<Cow<'_, MemoryBlock>> {
         self.blocks.get(&i_block).map(Cow::Borrowed).or_else(|| {
             let bytes = self.image.read((i_block * MemoryBlock::SIZE) as u64, MemoryBlock::SIZE)?
                 [..MemoryBlock::SIZE]
@@ -233,7 +233,7 @@ impl<I: ImageView> std::fmt::Debug for MemoryStore<I> {
 
         let mut map = f.debug_map();
         for (block_id, block) in blocks_sorted {
-            block.known_slices::<()>(0, MemoryBlock::SIZE, |ofs, bytes| {
+            let _ = block.known_slices::<()>(0, MemoryBlock::SIZE, |ofs, bytes| {
                 map.entry(&((block_id * MemoryBlock::SIZE) as u64 + ofs), &bytes);
                 ControlFlow::Continue(())
             });

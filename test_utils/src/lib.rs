@@ -82,11 +82,11 @@ impl MappedFsExe {
         &self.exe.ver
     }
 
-    pub fn pe_file(&self) -> PeFile {
+    pub fn pe_file(&self) -> PeFile<'_> {
         PeFile::from_bytes(&self.disk_view).unwrap()
     }
 
-    pub fn pe_view(&self) -> PeView {
+    pub fn pe_view(&self) -> PeView<'_> {
         PeView::from_bytes(&self.mem_view).unwrap()
     }
 }

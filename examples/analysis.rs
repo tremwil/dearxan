@@ -1,5 +1,3 @@
-use std::error::Error;
-
 use clap::Parser;
 use dearxan::analysis::{StubAnalyzer, analyze_all_stubs_with};
 use dearxan_test_utils::{fsbins, init_log};
