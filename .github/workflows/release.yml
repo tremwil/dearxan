@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
 
-      - run: cargo +nightly -Z package-workspace publish --dry-run -p dearxan,dearxan-test-utils
+      - run: cargo +nightly -Z package-workspace publish --dry-run -p dearxan -p dearxan-test-utils
 
   publish:
     if: github.event_name == 'push'
@@ -43,7 +43,7 @@ jobs:
           mv ./target/release/dearxan.lib ./target/dist/lib/dearxan-release.lib
 
       - name: crates.io publish
-        run: cargo +nightly -Z package-workspace publish -p dearxan,dearxan-test-utils --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo +nightly -Z package-workspace publish -p dearxan -p dearxan-test-utils --token ${{ secrets.CRATES_IO_TOKEN }}
 
       - name: Get package version
         id: get_version
