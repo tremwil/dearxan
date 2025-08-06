@@ -32,10 +32,7 @@ use std::time::Instant;
 
 use call_hook::CallHook;
 use closure_ffi::BareFnOnce;
-use pelite::{
-    pe::{Pe, PeObject},
-    pe64::PeView,
-};
+use pelite::pe64::{Pe, PeObject, PeView};
 use windows_sys::Win32::System::Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect};
 
 use crate::patch::ArxanPatch;
