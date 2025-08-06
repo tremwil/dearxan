@@ -31,7 +31,7 @@ pub fn format_step_state<I: super::ImageView, D: Clone>(step: &super::RunStep<'_
         step.state.registers.rsp().unwrap_or(0),
     );
 
-    let instr_info = instr_factory.info(&step.instruction);
+    let instr_info = instr_factory.info(step.instruction);
     for used_reg in instr_info.used_registers() {
         let code = op_access_code(used_reg.access());
         let reg_value = (used_reg.register().is_gpr())
@@ -51,7 +51,7 @@ pub fn format_step_state<I: super::ImageView, D: Clone>(step: &super::RunStep<'_
             .flatten();
 
         step_info
-            .write_fmt(format_args!("[{code}] mem[{va:x}] = {:x?}\t", mem_value))
+            .write_fmt(format_args!("[{code}] mem[{va:x}] = {mem_value:x?}\t"))
             .unwrap();
     }
 

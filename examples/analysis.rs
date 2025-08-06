@@ -36,7 +36,7 @@ fn main() {
 
     let args = CliArgs::parse();
     let game = fsbins()
-        .into_iter()
+        .iter()
         .find(|g| g.name.eq_ignore_ascii_case(&args.game))
         .and_then(|g| {
             args.ver
@@ -61,7 +61,7 @@ fn main() {
         }
         None => {
             log::info!("analyzing all stubs of {} v{}", game.game, game.ver);
-            analyze_all_stubs_with(&pe, analyzer)
+            analyze_all_stubs_with(pe, analyzer)
         }
     };
 

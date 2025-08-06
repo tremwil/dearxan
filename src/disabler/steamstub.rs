@@ -51,7 +51,7 @@ pub fn find_steamstub31_main(pe: PeView<'_>) -> Option<(u64, u64)> {
 
     let entry_rva = pe.optional_header().AddressOfEntryPoint;
     let base = pe.optional_header().ImageBase;
-    let [key, sig] = pe.derva::<[u32; 2]>(entry_rva - STEAMSTUB_HEADER_SIZE as u32).ok()?;
+    let [key, sig] = pe.derva::<[u32; 2]>(entry_rva - STEAMSTUB_HEADER_SIZE).ok()?;
     if key ^ sig != EXPECTED_SIGNATURE {
         return None;
     }

@@ -12,14 +12,14 @@ use windows::Win32::{
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-pub unsafe extern "system" fn DllMain(
+unsafe extern "system" fn DllMain(
     h_inst_dll: HMODULE,
     fdw_reason: u32,
     _lpv_reserved: *const (),
 ) -> i32 {
     if fdw_reason == DLL_PROCESS_ATTACH {
         unsafe {
-            DisableThreadLibraryCalls(h_inst_dll.into()).ok();
+            DisableThreadLibraryCalls(h_inst_dll).ok();
             AttachConsole(ATTACH_PARENT_PROCESS).or_else(|_| AllocConsole()).unwrap();
         };
         simplelog::CombinedLogger::init(vec![

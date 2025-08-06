@@ -77,13 +77,11 @@ impl ArxanPatch {
         let mut patches = Vec::with_capacity(analyzed_stubs.size_hint().0);
 
         for stub in analyzed_stubs {
-            if let Some(rlist) = &stub.encrypted_regions {
-                rlist
-                    .regions
-                    .first()
-                    .map(|r| decrypt_conflicts.entry(r.rva).or_default().push(rlist));
+            if let Some(rlist) = &stub.encrypted_regions
+                && let Some(r) = rlist.regions.first()
+            {
+                decrypt_conflicts.entry(r.rva).or_default().push(rlist)
             }
-
             patches.push(ArxanPatch::JmpHook {
                 target: stub.test_rsp_va,
                 pic: assemble_stub_patch(stub)?,
@@ -96,7 +94,7 @@ impl ArxanPatch {
         for conflicts in decrypt_conflicts.values() {
             // Get the region list that doesn't match existing bytes with the lowest Shannon entropy
             let Some(&rlist) = conflicts
-                .into_iter()
+                .iter()
                 .filter(|rlist| {
                     rlist.regions.first().is_some_and(|r| {
                         image.read(actual_base + r.rva as u64, r.size) != r.decrypted_slice(rlist)

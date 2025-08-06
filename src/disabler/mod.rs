@@ -251,12 +251,12 @@ unsafe fn apply_patch(patch: &ArxanPatch, code_buf: &CodeBuffer) {
             #[cfg(feature = "instrument_stubs")]
             let pic = &instrumented;
 
-            let hook = code_buf.write(&pic).unwrap().addr() as i64;
+            let hook = code_buf.write(pic).unwrap().addr() as i64;
             let jmp_immediate: i32 = hook.wrapping_sub(*target as i64 + 5).try_into().unwrap();
 
             let mut hook_site = unsafe { std::slice::from_raw_parts_mut(*target as *mut u8, 5) };
-            hook_site.write(&[0xE9]).unwrap();
-            hook_site.write(&jmp_immediate.to_le_bytes()).unwrap();
+            hook_site.write_all(&[0xE9]).unwrap();
+            hook_site.write_all(&jmp_immediate.to_le_bytes()).unwrap();
 
             log::trace!("patched arxan stub at {:016x}", *target);
         }

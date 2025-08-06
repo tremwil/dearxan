@@ -228,9 +228,9 @@ impl<'a> StubScanState<'a> {
         None
     }
 
-    fn update<I: ImageView, D: Clone>(&mut self, step: &RunStep<&'a I, D>) -> () {
+    fn update<I: ImageView, D: Clone>(&mut self, step: &RunStep<&'a I, D>) {
         if self.return_gadget.is_none() {
-            self.return_gadget = self.extract_return_gadget(&step);
+            self.return_gadget = self.extract_return_gadget(step);
             if let Some(g) = self.return_gadget.as_ref() {
                 log::trace!("return gadget found: {g:x?}");
             }
@@ -249,7 +249,7 @@ impl<'a> StubScanState<'a> {
         }
 
         // Check if this instruction is a call
-        let Some(call) = CallInfo::from_step(&step)
+        let Some(call) = CallInfo::from_step(step)
         else {
             return;
         };

@@ -97,9 +97,8 @@ impl CodeBuffer {
     }
 
     pub fn write(&self, bytes: &[u8]) -> Option<*mut [u8]> {
-        self.reserve(bytes.len()).map(|buf| unsafe {
+        self.reserve(bytes.len()).inspect(|&buf| unsafe {
             (buf as *mut u8).copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
-            buf
         })
     }
 }

@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|(_, id)| *id)
         .or_else(|| {
             log::info!("Shorthand name '{lowercase_game_name}' not recognized, assuming app id");
-            u32::from_str_radix(&lowercase_game_name, 10).ok()
+            lowercase_game_name.parse().ok()
         })
         .ok_or(format!(
             "'{lowercase_game_name}' is not a valid shorthand name or app id",

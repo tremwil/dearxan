@@ -153,6 +153,7 @@ impl<I: ImageView, D: Clone> RunStep<'_, I, D> {
 
 /// The kind of action that [`ProgramState::run`] should take to update the current program state.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum StepKind<I: ImageView, D: Clone = (), R = ()> {
     /// Single-step emulation of the current instruction.
     SingleStep,
@@ -467,10 +468,9 @@ impl<I: ImageView, D: Clone> ProgramState<I, D> {
     }
 
     fn adjust_rsp(&mut self, increment: i32) {
-        self.registers
-            .rsp_mut()
-            .as_mut()
-            .map(|rsp| *rsp = rsp.wrapping_add_signed(increment as i64));
+        if let Some(rsp) = self.registers.rsp_mut() {
+            *rsp = rsp.wrapping_add_signed(increment as i64)
+        }
     }
 
     fn handle_xchg(&mut self, instr: &Instruction) {

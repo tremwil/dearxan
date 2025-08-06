@@ -47,8 +47,8 @@ pub fn shannon_entropy(bytes: &[u8]) -> f64 {
     // -sum b/N * log2(b/N) = 1/N sum b(log2 N - log2 b)
     let plogp_sum: f64 = byte_dist
         .into_iter()
-        .filter_map(|b| (b != 0).then(|| b as f64))
-        .map(|b| b * (len_log2 - b.log2()))
+        .filter(|&b| b != 0)
+        .map(|b| (b as f64) * (len_log2 - (b as f64).log2()))
         .sum();
 
     plogp_sum / (bytes.len() as f64)
@@ -211,6 +211,13 @@ impl EncryptedRegionList {
         self.regions.len()
     }
 
+    /// Return true if this encrypted region list is empty.
+    ///
+    /// Shorthand for `self.regions.is_empty()`.
+    pub fn is_empty(&self) -> bool {
+        self.regions.is_empty()
+    }
+
     pub fn try_new(
         regions: Vec<EncryptedRegion>,
         mut ciphertext: impl Read,
@@ -219,7 +226,7 @@ impl EncryptedRegionList {
         let ctext_len = regions.last().map(|r| r.stream_offset + r.size).unwrap_or(0);
 
         let mut decrypted_stream = vec![0; ctext_len.next_multiple_of(8)];
-        ciphertext.read(&mut decrypted_stream)?;
+        ciphertext.read_exact(&mut decrypted_stream)?;
         tea_decrypt(&mut decrypted_stream, key);
         decrypted_stream.truncate(ctext_len);
 

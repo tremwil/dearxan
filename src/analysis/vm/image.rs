@@ -1,5 +1,17 @@
 use pelite::pe::{Pe, PeView};
 
+/// Opaque error type returned by [`ImageView::relocs64`] when image relocations cannot be read.
+#[derive(Debug, Clone, Copy)]
+pub struct BadRelocsError;
+
+impl std::fmt::Display for BadRelocsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("failed to read image relocations")
+    }
+}
+
+impl std::error::Error for BadRelocsError {}
+
 /// Abstraction over an immutable view of a mapped executable image.
 pub trait ImageView: Clone {
     /// The actual base address of the image.
@@ -11,7 +23,7 @@ pub trait ImageView: Clone {
     /// Iterate over the RVAs of all 64-bit relative relocations of the image.
     ///
     /// May fail with an opaque error if the relocations section of the image is corrupted.
-    fn relocs64(&self) -> Result<impl Iterator<Item = u32>, ()>;
+    fn relocs64(&self) -> Result<impl Iterator<Item = u32>, BadRelocsError>;
 
     /// Attempt to read at least `min_size` bytes at the virtual address `va`.
     ///
@@ -20,7 +32,7 @@ pub trait ImageView: Clone {
     fn read(&self, va: u64, min_size: usize) -> Option<&[u8]>;
 }
 
-impl<'a, I: ImageView> ImageView for &'a I {
+impl<I: ImageView> ImageView for &I {
     fn base_va(&self) -> u64 {
         (*self).base_va()
     }
@@ -29,7 +41,7 @@ impl<'a, I: ImageView> ImageView for &'a I {
         (*self).sections()
     }
 
-    fn relocs64(&self) -> Result<impl Iterator<Item = u32>, ()> {
+    fn relocs64(&self) -> Result<impl Iterator<Item = u32>, BadRelocsError> {
         (*self).relocs64()
     }
 
@@ -52,17 +64,18 @@ impl ImageView for PeView<'_> {
         })
     }
 
-    fn relocs64(&self) -> Result<impl Iterator<Item = u32>, ()> {
+    #[allow(clippy::filter_map_bool_then)]
+    fn relocs64(&self) -> Result<impl Iterator<Item = u32>, BadRelocsError> {
         let maybe_relocs = match self.base_relocs() {
             Ok(relocs) => Some(relocs),
             Err(pelite::Error::Null) => None,
-            Err(_) => return Err(()),
+            Err(_) => return Err(BadRelocsError),
         };
         Ok(maybe_relocs
             .into_iter()
             .flat_map(|relocs| relocs.iter_blocks())
             .flat_map(|block| {
-                block.words().into_iter().filter_map(move |w| {
+                block.words().iter().filter_map(move |w| {
                     // IMAGE_REL_BASED_DIR64 = 10
                     (block.type_of(w) == 10).then(|| block.rva_of(w))
                 })
@@ -102,7 +115,7 @@ impl<T: AsRef<[u8]> + Clone> ImageView for WithBase<T> {
         std::iter::once((self.base, self.bytes.as_ref()))
     }
 
-    fn relocs64(&self) -> Result<impl Iterator<Item = u32>, ()> {
+    fn relocs64(&self) -> Result<impl Iterator<Item = u32>, BadRelocsError> {
         Ok(std::iter::empty())
     }
 

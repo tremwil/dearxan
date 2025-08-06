@@ -144,15 +144,15 @@ pub fn fsbins() -> &'static [FsGame] {
                     let mut a_split = a.ver.split('.');
                     let mut b_split = b.ver.split('.');
                     for (a_seg, b_seg) in (&mut a_split).zip(&mut b_split) {
-                        if let (Ok(a_num), Ok(b_num)) = (
-                            usize::from_str_radix(a_seg, 10),
-                            usize::from_str_radix(b_seg, 10),
-                        ) {
-                            return a_num.cmp(&b_num);
+                        let ordering = match (a_seg.parse::<usize>(), b_seg.parse::<usize>()) {
+                            (Ok(a_num), Ok(b_num)) => a_num.cmp(&b_num),
+                            _ => a_seg.cmp(b_seg),
+                        };
+                        if ordering != std::cmp::Ordering::Equal {
+                            return ordering;
                         }
-                        return a_seg.cmp(b_seg);
                     }
-                    return a_split.cmp(b_split);
+                    a_split.cmp(b_split)
                 });
                 Some(FsGame {
                     name: game_name.to_string(),
