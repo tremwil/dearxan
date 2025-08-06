@@ -9,7 +9,7 @@ jobs:
   clippy:
     name: cargo clippy
 
-    runs-on: windows
+    runs-on: windows-latest
     env:
       RUSTFLAGS: "-Dwarnings"
     steps:
@@ -42,7 +42,7 @@ jobs:
   test_stable:
     name: build and test dearxan library on stable
 
-    runs-on: windows
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -51,7 +51,7 @@ jobs:
   test_nightly:
     name: build and test all utilities on nightly
 
-    runs-on: windows
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
