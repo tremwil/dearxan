@@ -13,6 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo publish -p dearxan-test-utils --dry-run
       - run: cargo publish --dry-run
 
   publish:
@@ -40,7 +42,10 @@ jobs:
         run: |
           cargo build --release -F ffi
           mv ./target/release/dearxan.lib ./target/dist/lib/dearxan-release.lib
-      
+
+      - name: crates.io publish (test-utils)
+        run: cargo publish -p dearxan-test-utils --token ${{ secrets.CRATES_IO_TOKEN }}
+
       - name: crates.io publish
         run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
 
