@@ -31,10 +31,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use closure_ffi::BareFnOnce;
 use iced_x86::{Decoder, DecoderOptions, FlowControl};
-use pelite::{
-    pe::{Pe, PeObject},
-    pe64::PeView,
-};
+use pelite::pe64::{Pe, PeObject, PeView};
 
 use super::{call_hook::CallHook, game::game};
 
