@@ -72,3 +72,7 @@ The crate comes with the following feature flags:
 - `ffi`: Exports a C function `dearxan_neuter_arxan` to use the Arxan disabler from another language.
 - `instrument_stubs`: Adds upon `disabler` by instrumenting each Arxan stub to log a message the first time it is called. **CAREFUL**: This feature currently crashes for games other than Dark Souls Remastered due to register clobbering! 
 - `internal_api`: Make most of the internal binary analysis APIs public through `dearxan::analysis::internal`. These APIs are *not* stabilized yet and may break between minor crate versions.
+
+# Credits
+
+Many thanks to [dasaav](https://github.com/Dasaav-dsv/) for helping me reverse engineer how Arxan stores the regions of memory to decrypt and for finding the encryption algorithm they used (32-round TEA).
