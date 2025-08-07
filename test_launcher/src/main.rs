@@ -1,7 +1,7 @@
 use std::{
     env::current_dir,
     error::Error,
-    ffi::{CString, OsStr},
+    ffi::CString,
     os::windows::io::{FromRawHandle, OwnedHandle},
     time::Duration,
 };
@@ -11,7 +11,6 @@ use dll_syringe::{
     Syringe,
     process::{OwnedProcess, Process},
 };
-use walkdir::WalkDir;
 use windows::{
     Win32::System::Threading::{
         CREATE_SUSPENDED, CreateProcessA, INFINITE, PROCESS_INFORMATION, ResumeThread,
@@ -20,22 +19,46 @@ use windows::{
     core::PCSTR,
 };
 
-const GAME_ALIASES: &[(&str, u32)] = &[
-    ("ds2s", 335300),
-    ("ds3", 374320),
-    ("dsr", 570940),
-    ("sdt", 814380),
-    ("er", 1245620),
-    ("ac6", 1888160),
-    ("nr", 2622380),
+struct Game {
+    alias: &'static str,
+    appid: u32,
+    exe_path: &'static str,
+}
+
+impl Game {
+    const fn new(alias: &'static str, appid: u32, exe_path: &'static str) -> Self {
+        Self {
+            alias,
+            appid,
+            exe_path,
+        }
+    }
+}
+
+const GAMES: &[Game] = &[
+    Game::new("ds2s", 335300, "Game/DarkSoulsII.exe"),
+    Game::new("ds3", 374320, "Game/DarkSoulsIII.exe"),
+    Game::new("dsr", 570940, "DarkSoulsRemastered.exe"),
+    Game::new("sdt", 814380, "sekiro.exe"),
+    Game::new("er", 1245620, "Game/eldenring.exe"),
+    Game::new("ac6", 1888160, "Game/armoredcore6.exe"),
+    Game::new("nr", 2622380, "Game/nightreign.exe"),
 ];
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct CliArgs {
     #[arg(
-        value_name = "GAME | APPID",
-        help = "Game to start and inject the arxan disabler into."
+        value_name = "GAME",
+        help = "Game alias or executable path to start and inject the arxan disabler into.",
+        long_help = "Game alias or executable path to start and inject the arxan disabler into. The valid aliases are:
+\t- ds2s (Dark Souls II SOTFS) 
+\t- ds3 (Dark Souls III) 
+\t- dsr (Dark Souls Remastered) 
+\t- sdt (Sekiro) 
+\t- er (Elden Ring)
+\t- nr (Elden Ring: Nightreign)
+"
     )]
     game: String,
 
@@ -82,48 +105,30 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
 
     let args = CliArgs::parse();
-    let lowercase_game_name = args.game.to_lowercase();
-    let game_app_id = GAME_ALIASES
-        .iter()
-        .find(|(str, _)| str == &lowercase_game_name)
-        .map(|(_, id)| *id)
-        .or_else(|| {
-            log::info!("Shorthand name '{lowercase_game_name}' not recognized, assuming app id");
-            lowercase_game_name.parse().ok()
-        })
-        .ok_or(format!(
-            "'{lowercase_game_name}' is not a valid shorthand name or app id",
-        ))?;
+    let lowercase_game_alias = args.game.to_lowercase();
+    let (game_path, appid) = match GAMES.iter().find(|game| game.alias == lowercase_game_alias) {
+        Some(game) => {
+            let (game_app, game_lib) =
+                steamlocate::SteamDir::locate()?.find_app(game.appid)?.ok_or(format!(
+                    "Game '{lowercase_game_alias}' (app ID {}) not found in local Steam libraries",
+                    game.appid
+                ))?;
 
-    let (game_app, game_lib) =
-        steamlocate::SteamDir::locate()?.find_app(game_app_id)?.ok_or(format!(
-            "Game '{lowercase_game_name}' (app ID {game_app_id}) not found in local Steam libraries"
-        ))?;
-
-    // Don't match the EAC launcher
-    let start_protected_game = Some(OsStr::new("start_protected_game"));
-    let game_folder = game_lib.resolve_app_dir(&game_app);
-    let game_path = WalkDir::new(&game_folder)
-        .max_depth(2)
-        .into_iter()
-        .filter_map(|f| f.ok())
-        .find(|f| {
-            let Some(parent) = f.path().parent()
-            else {
-                return false;
-            };
-            let correct_folder =
-                parent.file_name() == Some(OsStr::new("Game")) || parent == game_folder;
-            let is_exe = f.path().extension() == Some(OsStr::new("exe"));
-            let is_eac_launcher = f.path().file_name() == start_protected_game;
-            correct_folder && is_exe && !is_eac_launcher
-        })
-        .ok_or("Failed to find game launcher")?
-        .path()
-        .to_owned();
+            (
+                game_lib.resolve_app_dir(&game_app).join(game.exe_path),
+                args.env_app_id.unwrap_or(game.appid),
+            )
+        }
+        None => {
+            log::info!("unknown game alias, assuming path to executable");
+            let appid = args
+                .env_app_id
+                .ok_or("--env_app_id must be specified when using an explicit executable path")?;
+            (args.game.into(), appid)
+        }
+    };
 
     let game_dir = game_path.parent().unwrap();
-
     let game_path_cstr = CString::new(game_path.as_os_str().to_str().unwrap())?;
     let game_dir_cstr = CString::new(game_dir.as_os_str().to_str().unwrap())?;
 
@@ -132,10 +137,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         if args.instrument_stubs {
             build_args.extend_from_slice(&["-F", "instrument_stubs"]);
         }
+        log::info!("Building test DLL");
         std::process::Command::new("cargo").args(build_args).status()?;
 
-        let dll_path = current_dir()?.join("target").join("release").join("dearxan_test_dll.dll");
-
+        let dll_path = current_dir()?.join("target/release/dearxan_test_dll.dll");
         log::info!("DLL path: {}", dll_path.display());
         Some(dll_path)
     }
@@ -145,9 +150,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     log::info!("Game path: {}", game_path.display());
 
-    let launch_app_id = args.env_app_id.unwrap_or(game_app_id);
-    log::info!("Launching with app ID: {}", launch_app_id);
-    unsafe { std::env::set_var("SteamAppId", launch_app_id.to_string()) };
+    log::info!("Launching with app ID: {}", appid);
+    unsafe { std::env::set_var("SteamAppId", appid.to_string()) };
 
     let startup = STARTUPINFOA {
         cb: size_of::<STARTUPINFOA>().try_into()?,
