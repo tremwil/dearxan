@@ -19,12 +19,14 @@ pub type DearxanUserCallback =
 /// This function must be called before the game's entry point runs. It is generally safe to call
 /// from within DllMain.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dearxan_neuter_arxan(callback: DearxanUserCallback, context: *mut c_void) {
+pub unsafe extern "C" fn dearxan_neuter_arxan(callback: Option<DearxanUserCallback>, context: *mut c_void) {
     let context_send = context.addr();
     // SAFETY: Send'ness of context is asserted by caller
     unsafe {
         super::neuter_arxan(move |entry, has_arxan| {
-            callback(entry, has_arxan, context_send as *mut c_void)
+            if let Some(callback) = callback {
+                callback(entry, has_arxan, context_send as *mut c_void);
+            }
         })
     };
 }
