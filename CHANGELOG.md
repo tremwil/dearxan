@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.2.0] - 2025-08-07
+
+### Added
+- `dearxan::analysis::is_arxan_hooked_entry_point` to check if the entry point of the executable image is hooked by Arxan
+
+### Fixed
+- Missing text in readme
+- `dearxan::disabler::schedule_after_arxan` not properly checking if Arxan was applied to the entry point (thanks @Dasaav-dsv for raising this issue)
+
+### Removed
+- `dearxan::disabler::is_arxan_entry`. Use `dearxan::analysis::is_arxan_hooked_entry_point` instead.
+
+### Changed
+- Hardcoded game executable paths for game aliases in `test_launcher` to prevent it detecting a different executable if many are present.
+
 ## [v0.1.2] - 2025-08-07
 
 ### Fixed
