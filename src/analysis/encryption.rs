@@ -156,8 +156,6 @@ impl EncryptedRegion {
             tea_block_decrypt(&mut block, &key_local);
             decoded_varints.extend_from_slice(bytemuck::bytes_of(&block));
 
-            log::trace!("block: {:08x?}", block);
-
             loop {
                 let (offset, offset_size) = match try_read_varint(&decoded_varints[cursor..]) {
                     Ok((o, s)) => (o, s),
