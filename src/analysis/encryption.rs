@@ -78,12 +78,21 @@ pub fn tea_block_decrypt(block: &mut [u32; 2], key: &[u32; 4]) {
 /// The length of the slice does not need to be a multiple of 8 (the TEA block size). However, if an
 /// incomplete block is present, it will not be decrypted.
 pub fn tea_decrypt(bytes: &mut [u8], key: &[u8; 16]) {
+    #[cfg(feature = "rayon")]
+    use rayon::{iter::ParallelIterator, slice::ParallelSliceMut};
+
     let local_key: [u32; 4] = bytemuck::cast(*key);
-    for chunk in bytes.chunks_exact_mut(8) {
+
+    #[cfg(feature = "rayon")]
+    let iter = bytes.par_chunks_exact_mut(8);
+    #[cfg(not(feature = "rayon"))]
+    let iter = bytes.chunks_exact_mut(8);
+
+    iter.for_each(|chunk| {
         let mut local_block: [u32; 2] = bytemuck::pod_read_unaligned(chunk);
         tea_block_decrypt(&mut local_block, &local_key);
         chunk.copy_from_slice(bytemuck::bytes_of(&local_block));
-    }
+    });
 }
 
 /// Error type which may be raised when reading a 32-bit varint-encoded integer.
