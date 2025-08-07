@@ -93,14 +93,15 @@ impl ArxanPatch {
 
         for conflicts in decrypt_conflicts.values() {
             // Get the region list that doesn't match existing bytes with the lowest Shannon entropy
-            let Some(&rlist) = conflicts
+            let Some((rlist, _)) = conflicts
                 .iter()
-                .filter(|rlist| {
-                    rlist.regions.first().is_some_and(|r| {
-                        image.read(actual_base + r.rva as u64, r.size) != r.decrypted_slice(rlist)
-                    })
+                .filter_map(|rlist| {
+                    let first = rlist.regions.first()?;
+                    (image.read(actual_base + first.rva as u64, first.size)
+                        != first.decrypted_slice(rlist))
+                    .then(|| (*rlist, shannon_entropy(&rlist.decrypted_stream)))
                 })
-                .min_by_key(|r| (shannon_entropy(&r.decrypted_stream) * 10e6) as i64)
+                .min_by(|a, b| f64::total_cmp(&a.1, &b.1))
             else {
                 continue;
             };
