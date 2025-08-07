@@ -4,7 +4,7 @@
 
 It is currently able to fully[^1] neuter Arxan in all the FromSoftware games using it. In particular, once patches are applied absolutely zero Arxan code (e.g. anti-debug checks and integrity checks) will run and all encrypted functions will be forever decrypted.
 
-[^1]: This is not quite true at the moment, since we still have to let the Arxan entry point stubs run. This is not really a problem as the entry point stub does not  However, once they are fully reverse engineered it will be possible to skip this too.
+[^1]: This is not quite true at the moment, since we still have to let the Arxan entry point stubs run. This is not really a problem as the entry point stub does not do any anti-debug checks. In some games (e.g. Dark Souls Remastered) these stubs perform integrity checks and crash the game if modifications are detected, which can be mitigated by performing your hooks in the callback function provided to `neuter_arxan`. Once the entry point stubs are fully reverse engineered, this will no longer be necessary.
 
 Note that this crate is only tested against the variants of Arxan present in the latest versions FromSoftware games, which is all of the following:
 - Dark Souls Remastered
