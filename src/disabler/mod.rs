@@ -35,6 +35,7 @@ use closure_ffi::BareFnOnce;
 use pelite::pe64::{Pe, PeObject, PeView};
 use windows_sys::Win32::System::Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect};
 
+use crate::analysis::is_arxan_hooked_entry_point;
 use crate::patch::ArxanPatch;
 
 mod call_hook;
@@ -173,7 +174,8 @@ where
 
     unsafe {
         schedule_after_steamstub(move |maybe_arxan_entry, _| {
-            let Some(game_entry) = is_arxan_entry(maybe_arxan_entry)
+            let Some((game_entry, _)) =
+                is_arxan_hooked_entry_point(game().pe, maybe_arxan_entry as u64)
             else {
                 log::info!(
                     "Arxan entry point hook not detected. Assuming arxan was not applied to this binary"
@@ -195,7 +197,7 @@ where
                     log::debug!("running Arxan entry point stub");
                     arxan_stub_hook.original()();
                     log::debug!("running callback function");
-                    callback(game_entry, true)
+                    callback(game_entry as *const _, true)
                 },
                 &game().hook_buffer,
             );
@@ -204,36 +206,6 @@ where
             arxan_stub_hook.hook_with(detour.leak());
         });
     }
-}
-
-/// Checks if the given entry point was hooked by Arxan, returning the address of the
-/// original entry point if it was.
-///
-/// # Safety
-/// `entry_point` must point to at least 18 bytes of readable memory.
-pub unsafe fn is_arxan_entry(entry_point: *const u8) -> Option<*const u8> {
-    #[rustfmt::skip]
-    let arxan_entry_pattern: &[u8; 18] = &[
-        0x48,0x83,0xec,0x28,        // sub rsp, 28
-        0xe8,0x00,0x00,0x00,0x00,   // call {arxan entry stub}
-        0x48,0x83,0xc4,0x28,        // add rsp, 28
-        0xe9,0x00,0x00,0x00,0x00    // jmp {true entry point}
-    ];
-
-    // If all non-zero bytes match, consider the entry point hooked by Arxan
-    let entry_point_bytes = unsafe { &*(entry_point as *const [u8; 18]) };
-    if entry_point_bytes
-        .iter()
-        .zip(arxan_entry_pattern)
-        .all(|(b, pat)| *pat == 0 || b == pat)
-    {
-        // Calculate the target of the last jmp instruction
-        let jmp_imm = i32::from_le_bytes(entry_point_bytes[14..].try_into().unwrap());
-        let true_entry =
-            entry_point.map_addr(|addr| (addr + 18).wrapping_add_signed(jmp_imm as isize));
-        return Some(true_entry);
-    }
-    None
 }
 
 unsafe fn apply_patch(patch: &ArxanPatch, code_buf: &CodeBuffer) {
