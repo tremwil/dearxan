@@ -41,15 +41,28 @@ pub use self::{
     vm::{ImageView, image::WithBase},
 };
 
-fn find_test_rsp_instructions<'a, I: ImageView>(
-    image: &'a I,
-) -> impl Iterator<Item = u64> + use<'a, I> {
+fn find_test_rsp_instructions<'a, I: ImageView>(image: &'a I) -> Vec<u64> {
     use memchr::memmem::find_iter;
+    #[cfg(feature = "rayon")]
+    use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 
     const TEST_RSP_15: &[u8] = b"\x48\xf7\xc4\x0f\x00\x00\x00";
-    image
-        .sections()
+
+    let sections = image.sections().collect::<Vec<_>>();
+
+    #[cfg(not(feature = "rayon"))]
+    return sections
+        .into_iter()
         .flat_map(|(va, slice)| find_iter(slice, TEST_RSP_15).map(move |offset| va + offset as u64))
+        .collect();
+
+    #[cfg(feature = "rayon")]
+    sections
+        .into_par_iter()
+        .flat_map(|(va, slice)| {
+            find_iter(slice, TEST_RSP_15).map(move |offset| va + offset as u64).par_bridge()
+        })
+        .collect()
 }
 
 /// Analyze all Arxan stubs found in the executable image using the provided [`StubAnalyzer`].
@@ -65,7 +78,7 @@ pub fn analyze_all_stubs_with<
     #[cfg(feature = "rayon")]
     use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-    let test_rsp_vas: Vec<_> = find_test_rsp_instructions(&image).collect();
+    let test_rsp_vas = find_test_rsp_instructions(&image);
 
     log::debug!("Found {} potential Arxan stubs", test_rsp_vas.len());
 
