@@ -193,7 +193,7 @@ impl<I: ImageView, D: Clone> ArxanCfgVisitor<I, D> {
         // Ignore the RSP-aligning first branch path that doesn't correspond to the
         // actual RSP value
         let ignored_test_rsp_branch = match self.0.registers.rsp() {
-            Some(rsp) if rsp % 16 == 0 => 1,
+            Some(rsp) if rsp.is_multiple_of(16) => 1,
             _ => 0,
         };
         let mut bad_cmp_rax_branch = None;
