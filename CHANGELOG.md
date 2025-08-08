@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.2.1] - 2025-08-08
+
+### Changed
+- Improved parallelization of stub analysis and patch generation by @Dasaav-dsv
+
+### Fixed
+- Missing `--check` argument to `cargo fmt` in CI
+- Incorrect signature `dearxan_neuter_arxan` in the provided include file
+- Fix UB on the rust side of `dearxan_neuter_arxan` when the user passes a null callback by @Dasaav-dsv
+
 ## [v0.2.0] - 2025-08-07
 
 ### Added
