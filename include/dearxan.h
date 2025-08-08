@@ -25,7 +25,7 @@ typedef void (*DearxanUserCallback)(uint64_t original_entry_point, bool arxan_de
 /// # Safety
 /// This function must be called before the game's entry point runs. It is generally safe to call
 /// from within DllMain.
-extern void dearxan_neuter_arxan(DearxanUserCallback callback);
+extern void dearxan_neuter_arxan(DearxanUserCallback callback, void* context);
 
 #ifdef __cplusplus
 };
