@@ -28,7 +28,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
-      - run: cargo fmt --all
+      - run: cargo fmt --check --all
 
   rustdoc:
     name: cargo doc
