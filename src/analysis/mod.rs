@@ -41,7 +41,7 @@ pub use self::{
     vm::{ImageView, image::WithBase},
 };
 
-fn find_test_rsp_instructions<'a, I: ImageView>(image: &'a I) -> Vec<u64> {
+fn find_test_rsp_instructions<I: ImageView>(image: &I) -> Vec<u64> {
     use memchr::memmem::find_iter;
     #[cfg(feature = "rayon")]
     use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
