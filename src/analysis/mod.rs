@@ -3,6 +3,7 @@ mod encryption;
 mod entry_point;
 mod stub_info;
 mod symbolic;
+mod util;
 mod vm;
 
 /// Internal analysis API.
