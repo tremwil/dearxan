@@ -85,7 +85,8 @@ impl<I: ImageView> MemoryStore<I> {
         }
 
         let (i_start_block, start_ofs) = Self::block_and_offset(addr);
-        let (i_end_block, end_ofs) = Self::block_and_offset(addr + out_buf.len() as u64 - 1);
+        let (i_end_block, end_ofs) =
+            Self::block_and_offset(addr.checked_add(out_buf.len() as u64 - 1)?);
 
         if i_start_block == i_end_block {
             let block = self.get_block(i_start_block)?;
@@ -154,7 +155,7 @@ impl<I: ImageView> MemoryStore<I> {
         }
 
         let (i_start_block, start_ofs) = Self::block_and_offset(addr);
-        let (i_end_block, end_ofs) = Self::block_and_offset(addr + count as u64 - 1);
+        let (i_end_block, end_ofs) = Self::block_and_offset(addr.saturating_add(count as u64 - 1));
 
         if i_start_block == i_end_block {
             let block = self.get_block_mut(i_start_block);
