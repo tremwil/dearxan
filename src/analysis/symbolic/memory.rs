@@ -65,16 +65,4 @@ impl<I: ImageView> Memory<I> {
 
         self.writes == other.writes
     }
-
-    pub fn equal_except_one(&self, other: &Self) -> bool {
-        if self.has_unk_write || other.has_unk_write {
-            return false;
-        }
-
-        self.writes.iter().all(|(key, val)| {
-            (key == except_addr)
-                .then(|| val == except_val)
-                .unwrap_or(other.writes.get(key).map_or(false, |v| v == val))
-        })
-    }
 }

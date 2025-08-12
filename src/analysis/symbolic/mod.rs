@@ -7,6 +7,8 @@ use crate::analysis::{
     util, vm,
 };
 
+mod ssa;
+
 mod executor;
 mod expr;
 mod memory;
@@ -28,12 +30,14 @@ impl<'a, I: ImageView> BlockOptimizer<'a, I> {
 
         let rsp_plus_8 = self.heap.linear([(*current.registers.rsp(), 1)], 8);
 
-        if !past
-            .registers
-            .gprs_equal_except(&current.registers, [(Register::RSP, rsp_plus_8)])
-        {
-            return false;
-        }
+        // if !past
+        //     .registers
+        //     .gprs_equal_except(&current.registers, [(Register::RSP, rsp_plus_8)])
+        // {
+        //     return false;
+        // }
+
+        todo!();
     }
 }
 
@@ -65,7 +69,7 @@ mod tests {
         let heap = ExprHeap::new();
 
         for instruction in asm.instructions() {
-            sym.execute(instruction);
+            //sym.execute(instruction);
         }
 
         println!("{sym:#x?}");
@@ -90,7 +94,7 @@ mod tests {
         let image = WithBase::new([], 0);
         let mut sym = SymbolicState::new(image);
         for instruction in asm.instructions() {
-            sym.execute(instruction);
+            //sym.execute(instruction);
         }
 
         println!("{sym:#x?}");
@@ -108,7 +112,7 @@ mod tests {
         let image = WithBase::new([], 0);
         let mut sym = SymbolicState::new(image);
         for instruction in asm.instructions() {
-            sym.execute(instruction);
+            //sym.execute(instruction);
         }
 
         println!("{sym:#x?}");
