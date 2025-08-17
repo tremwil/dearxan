@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v0.2.2]
+## [v0.3.0] - 2025-08-17
+
+### Breaking Changes
+- the FFI API and most `dearxan::disabler` functions have had major API changes to support process-wide synchronization. Refer to the docs for updated usage examples.
+
+### Changed
+- Process-wide synchronization of `dearxan::disabler::neuter_arxan` by @Dasaav-dsv. This ensures that your callback will be invoked after Arxan has been patched, no matter if other DLL mods using the library have already called it.
+
+### Fixed
+- Relocs being applied over disabler patches even when unnecessary
+
+## [v0.2.2] - 2025-08-12
 
 ### Fixed
 - Missing overflow checks in memory emulation code causing panics in debug builds by @Dasaav-dsv
