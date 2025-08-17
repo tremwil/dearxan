@@ -10,7 +10,7 @@ pub struct Status {
 }
 
 /// Errors that prevented dearxan from finishing.
-/// 
+///
 /// Either a `dyn`[`std::error::Error`] error or a payload panic as a string.
 #[derive(Debug)]
 pub enum Error {
@@ -18,7 +18,9 @@ pub enum Error {
     Panic(String),
 }
 
-pub(crate) fn from_error<E: Into<Box<dyn std::error::Error + Send + Sync>>>(err: E) -> DearxanResult {
+pub(crate) fn from_error<E: Into<Box<dyn std::error::Error + Send + Sync>>>(
+    err: E,
+) -> DearxanResult {
     Err(Error::Error(err.into()))
 }
 
