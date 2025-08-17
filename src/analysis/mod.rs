@@ -1,8 +1,8 @@
 mod cfg;
 mod encryption;
 mod entry_point;
+mod ssa;
 mod stub_info;
-mod symbolic;
 mod util;
 mod vm;
 
