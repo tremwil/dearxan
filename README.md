@@ -65,6 +65,32 @@ void runs_before_entry_point() {
 
 Note that the minimal supported C++ standard is C++14, although C++17 and above are recommended.
 
+## From C
+
+Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and link to it. Include `include/dearxan.h` and call `dearxan_neuter_arxan` before the game's entry point runs:
+
+```C
+#include <stdio.h>
+
+#include "include/dearxan.h"
+
+void my_callback(const DearxanResult* result, void* opaque) {
+    if (result->status == DearxanSuccess) {
+        printf("Arxan disabled!\n");
+    } else {
+        printf(
+            "%.*s\nFailed to disable Arxan!\n",
+            (int)result->error_msg_size,
+            result->error_msg
+        );
+    }
+}
+
+void runs_before_entry_point() {
+    dearxan_neuter_arxan(my_callback, NULL);
+}
+```
+
 ## From another language
 
 Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and link to it. Generate C bindings according to `include/dearxan.h` and call `dearxan_neuter_arxan` before the game's entry point runs.
