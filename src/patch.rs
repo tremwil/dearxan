@@ -127,7 +127,7 @@ impl ArxanPatch {
 
         // Handle relocs to decrypted regions, if necessary
         match preferred_base {
-            Some(preferred) /* if preferred != actual_base */ => {
+            Some(preferred) if preferred != actual_base => {
                 // Use a mergesort like pass to match regions with their relocs
                 writes.sort_by_key(|(rva, _)| *rva);
 
