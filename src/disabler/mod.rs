@@ -36,19 +36,23 @@ use pelite::pe64::{Pe, PeObject, PeView};
 use windows_sys::Win32::System::Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect};
 
 use crate::analysis::is_arxan_hooked_entry_point;
+use crate::disabler::result::{DearxanResult, Status};
+use crate::disabler::slist::SList;
+use crate::disabler::steamstub::schedule_after_steamstub;
 use crate::patch::ArxanPatch;
 
 mod call_hook;
 mod code_buffer;
-mod game;
-mod steamstub;
-
-#[cfg(feature = "ffi")]
 pub mod ffi;
+mod game;
+#[macro_use]
+mod lazy_global;
+pub mod result;
+mod slist;
+mod steamstub;
 
 use code_buffer::CodeBuffer;
 use game::game;
-pub use steamstub::schedule_after_steamstub;
 
 /// Single function to neuter all of Arxan's checks.
 ///
@@ -58,86 +62,111 @@ pub use steamstub::schedule_after_steamstub;
 ///
 /// Handles SteamStub 3.1 possibly being applied on top of Arxan.
 ///
-/// # Panics
-/// If called more than once.
-///
-/// <div class="warning">
-///
-/// Note that this function calls [`schedule_after_steamstub`] and
-/// [`schedule_after_arxan`], which can also be called at most once. Hence they are mutually
-/// exclusive.
-///
-/// </div>
-///
 /// # Safety
+///
 /// This function must be called before the game's entry point runs. It is generally safe to call
 /// from within DllMain.
 pub unsafe fn neuter_arxan<F>(callback: F)
 where
-    F: FnOnce(*const u8, bool) + Send + 'static,
+    F: FnOnce(DearxanResult) + Send + 'static,
 {
-    static CALLED: AtomicBool = AtomicBool::new(false);
-    assert!(
-        !CALLED.swap(true, Ordering::Relaxed),
-        "ArxanDisabler::disable already called once"
-    );
+    // Functions are carefully wrapped in `std::panic::catch_unwind` to entry point panics!
+    lazy_global! {
+        static DEARXAN_NEUTER_ARXAN_RESULT: ffi::DearxanResult = unsafe {
+            let maybe_panicked = std::panic::catch_unwind(|| match neuter_arxan_inner() {
+                Ok(status) => Ok(status),
+                Err(err) => result::from_error(err),
+            });
 
-    unsafe {
-        schedule_after_arxan(|entry_point, is_present| {
-            if !is_present {
-                callback(entry_point, false);
-                return;
-            }
+            ffi::DearxanResult::from(match maybe_panicked {
+                Ok(result) => result,
+                Err(payload) => result::from_panic_payload(payload),
+            })
+        };
+    }
 
-            let game = game();
+    unsafe fn neuter_arxan_inner() -> Result<Status, Box<dyn std::error::Error + Send + Sync>> {
+        static CALLED: AtomicBool = AtomicBool::new(false);
+        if CALLED.swap(true, Ordering::Relaxed) {
+            panic!("neuter_arxan_inner must not be called more than once");
+        }
+
+        let game = game();
+        unsafe {
             make_module_rwe(game.pe);
+        }
 
-            let analysis_time = Instant::now();
-            log::info!("analyzing Arxan stubs");
+        let analysis_time = Instant::now();
+        log::info!("analyzing Arxan stubs");
 
-            let analysis_results = crate::analysis::analyze_all_stubs(game.pe);
-            let num_found = analysis_results.len();
-            log::info!(
-                "analysis completed in {:.3?}. {} stubs found",
-                analysis_time.elapsed(),
-                num_found
-            );
+        let analysis_results = crate::analysis::analyze_all_stubs(game.pe);
+        let num_found = analysis_results.len();
+        log::info!(
+            "analysis completed in {:.3?}. {} stubs found",
+            analysis_time.elapsed(),
+            num_found
+        );
 
-            let good_stubs: Vec<_> = analysis_results
-                .into_iter()
-                .filter_map(|maybe_stub| maybe_stub.inspect_err(|err| log::error!("{err}")).ok())
-                .collect();
+        let good_stubs: Vec<_> = analysis_results
+            .into_iter()
+            .filter_map(|maybe_stub| maybe_stub.inspect_err(|err| log::error!("{err}")).ok())
+            .collect();
 
-            if good_stubs.len() != num_found {
-                panic!("analysis of some Arxan stubs failed, aborting");
-            }
+        if good_stubs.len() != num_found {
+            return Err("failed to generate patches for all stubs".into());
+        }
 
-            log::info!("generating patches");
-            let patch_gen_time = Instant::now();
-            let patches = crate::patch::ArxanPatch::build_from_stubs(
-                game.pe,
-                Some(game.preferred_base),
-                good_stubs.iter(),
-            )
-            .expect("failed to generate patches for all stubs");
+        log::info!("generating patches");
+        let patch_gen_time = Instant::now();
+        let patches = crate::patch::ArxanPatch::build_from_stubs(
+            game.pe,
+            Some(game.preferred_base),
+            good_stubs.iter(),
+        )?;
 
-            log::info!(
-                "generated {} patches in {:.3?}",
-                patches.len(),
-                patch_gen_time.elapsed()
-            );
+        log::info!(
+            "generated {} patches in {:.3?}",
+            patches.len(),
+            patch_gen_time.elapsed()
+        );
 
-            log::info!("applying patches");
-            let patch_apply_time = Instant::now();
-            for patch in &patches {
+        log::info!("applying patches");
+        let patch_apply_time = Instant::now();
+        for patch in &patches {
+            unsafe {
                 apply_patch(patch, &game.hook_buffer);
             }
-            log::info!(
-                "all patches applied in {:3?}. Arxan is now neutered",
-                patch_apply_time.elapsed()
-            );
-            log::debug!("invoking user callback");
-            callback(entry_point, true);
+        }
+        log::info!(
+            "all patches applied in {:3?}. Arxan is now neutered",
+            patch_apply_time.elapsed()
+        );
+        log::debug!("invoking user callback");
+
+        Ok(Status {
+            is_arxan_detected: true,
+            is_executing_entrypoint: true,
+        })
+    }
+
+    unsafe {
+        schedule_after_arxan(|is_present, is_executing_entrypoint| {
+            let result = if is_present {
+                match std::panic::catch_unwind(|| {
+                    ffi::DearxanResult::from_global(&DEARXAN_NEUTER_ARXAN_RESULT)
+                }) {
+                    Ok(result) => result.into(),
+                    Err(payload) => result::from_panic_payload(payload),
+                }
+            }
+            else {
+                Ok(Status {
+                    is_arxan_detected: false,
+                    is_executing_entrypoint,
+                })
+            };
+
+            callback(result);
         });
     }
 }
@@ -146,65 +175,84 @@ where
 /// It runs immediately if Arxan was not detected.
 ///
 /// The callback receives the following:
-/// - a pointer original entry point before Arxan was applied to the executable
 /// - a boolean indicating whether Arxan was detected
+/// - a boolean indicating whether execution is blocking the entry point.
 ///
 /// Handles SteamStub 3.1 possibly being applied on top of Arxan.
 ///
-/// # Panics
-/// If called more than once.
-///
-/// <div class="warning">
-///
-/// Note this function calls [`schedule_after_steamstub`] and is called by [`neuter_arxan`],
-/// both of which can only be called once. Hence all three are mutually exclusive.
-///
-/// </div>
-///
 /// # Safety
-/// This function should only be called before the entry point of the game runs.
+///
+/// This function must be called before the game's entry point runs. It is generally safe to call
+/// from within DllMain.
 pub unsafe fn schedule_after_arxan<F>(callback: F)
 where
-    F: FnOnce(*const u8, bool) + Send + 'static,
+    F: FnOnce(bool, bool) + Send + 'static,
 {
-    static CALLED: AtomicBool = AtomicBool::new(false);
-    if CALLED.swap(true, Ordering::Relaxed) {
-        panic!("schedule_after_arxan must not be called more than once");
+    lazy_global! {
+        static DEARXAN_SCHEDULED_AFTER_ARXAN: SList<unsafe extern "C" fn(bool, bool)> = {
+            unsafe {
+                schedule_after_arxan_inner();
+            };
+            SList::new()
+        };
+    }
+
+    unsafe fn schedule_after_arxan_inner() {
+        static CALLED: AtomicBool = AtomicBool::new(false);
+        if CALLED.swap(true, Ordering::Relaxed) {
+            panic!("schedule_after_arxan_inner must not be called more than once");
+        }
+
+        unsafe {
+            schedule_after_steamstub(move |maybe_arxan_entry, _| {
+                if is_arxan_hooked_entry_point(game().pe, maybe_arxan_entry as u64).is_none() {
+                    log::info!(
+                        "Arxan entry point hook not detected. Assuming Arxan was not applied to this binary"
+                    );
+
+                    // Prevent potential initialization deadlock.
+                    std::thread::spawn(|| {
+                        let callbacks = (*DEARXAN_SCHEDULED_AFTER_ARXAN.0).flush();
+                        for callback in callbacks {
+                            callback(false, false);
+                        }
+                    });
+
+                    return;
+                };
+
+                // Arxan entry stubs begin first SUB rsp, 28 (4 bytes)
+                let entry_stub_hook = &*Box::leak(Box::new(
+                    CallHook::<unsafe extern "C" fn()>::new(maybe_arxan_entry.add(4) as *mut u8),
+                ));
+
+                let detour = BareFnOnce::new_c_in(
+                    move || {
+                        log::debug!("removing Arxan entry point hook");
+                        entry_stub_hook.unhook();
+                        // TODO: Fully reverse the entry point so this is not necessary
+                        log::debug!("running Arxan entry point stub");
+                        entry_stub_hook.original()();
+                        log::debug!("running callback functions");
+
+                        let callbacks = (*DEARXAN_SCHEDULED_AFTER_ARXAN.0).flush();
+                        for callback in callbacks {
+                            callback(true, true);
+                        }
+                    },
+                    &game().hook_buffer,
+                );
+
+                log::debug!("detouring Arxan entry point stub");
+                entry_stub_hook.hook_with(detour.leak());
+            });
+        }
     }
 
     unsafe {
-        schedule_after_steamstub(move |maybe_arxan_entry, _| {
-            let Some((game_entry, _)) =
-                is_arxan_hooked_entry_point(game().pe, maybe_arxan_entry as u64)
-            else {
-                log::info!(
-                    "Arxan entry point hook not detected. Assuming arxan was not applied to this binary"
-                );
-                callback(maybe_arxan_entry, false);
-                return;
-            };
-
-            // Arxan entry stubs begin first SUB rsp, 28 (4 bytes)
-            let arxan_stub_hook = &*Box::leak(Box::new(CallHook::<unsafe extern "C" fn()>::new(
-                maybe_arxan_entry.add(4) as *mut u8,
-            )));
-
-            let detour = BareFnOnce::new_c_in(
-                move || {
-                    log::debug!("removing Arxan entry point hook");
-                    arxan_stub_hook.unhook();
-                    // TODO: Fully reverse the entry point so this is not necessary
-                    log::debug!("running Arxan entry point stub");
-                    arxan_stub_hook.original()();
-                    log::debug!("running callback function");
-                    callback(game_entry as *const _, true)
-                },
-                &game().hook_buffer,
-            );
-
-            log::debug!("detouring Arxan entry point stub");
-            arxan_stub_hook.hook_with(detour.leak());
-        });
+        let callbacks = &*DEARXAN_SCHEDULED_AFTER_ARXAN.0;
+        let bare_callback = BareFnOnce::new_c(callback);
+        callbacks.push(bare_callback.leak());
     }
 }
 
