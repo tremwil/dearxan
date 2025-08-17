@@ -56,7 +56,7 @@ impl<T> Deref for LazyGlobal<T> {
 
     #[track_caller]
     fn deref(&self) -> &Self::Target {
-        &*self.0
+        &self.0
     }
 }
 
