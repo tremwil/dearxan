@@ -11,7 +11,7 @@ use windows_sys::Win32::System::{
 };
 
 /// Lightweight FFI friendly atomic singly linked list.
-/// 
+///
 /// Used together with [`lazy_global`] to guarantee a particular collection layout,
 /// whereas using [`Vec`] would not be (say, between Rust versions).
 #[repr(C, align(16))]
@@ -58,7 +58,7 @@ impl<T> SList<T> {
     }
 
     /// Atomically takes the contents of the linked list and returns them as a [`Vec`].
-    /// 
+    ///
     /// The elements are ordered in FIFO order.
     pub fn flush(&self) -> Vec<T> {
         let mut entries = vec![];
