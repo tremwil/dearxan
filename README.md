@@ -30,7 +30,7 @@ Then, simply call the `dearxan::disabler::neuter_arxan` function once before the
 unsafe fn runs_before_entry_point() {
     use dearxan::disabler::neuter_arxan;
 
-    neuter_arxan(|original_entry_point, arxan_is_present| {
+    neuter_arxan(|result| {
         println!("Arxan disabled!");
         // This is a good place to do your hooks.
         // Once this callback returns, the game's true entry point
