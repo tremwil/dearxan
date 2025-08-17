@@ -43,11 +43,8 @@ unsafe extern "system" fn DllMain(
         .unwrap();
 
         unsafe {
-            neuter_arxan(|entry, has_arxan| {
-                log::info!(
-                    "arxan detected: {has_arxan}. True entry point: {:x}",
-                    entry.addr()
-                );
+            neuter_arxan(|result| {
+                log::info!("arxan detected: {result:?}");
             })
         };
     }
