@@ -12,7 +12,7 @@
 //!
 //! unsafe fn my_entry_point() {
 //!     unsafe {
-//!         neuter_arxan(|original_entry_point, arxan_was_present| {
+//!         neuter_arxan(|result| {
 //!             println!("Arxan disabled!");
 //!             // This is a good place to do your hooks.
 //!             // Once this callback returns, the game's true entry point
