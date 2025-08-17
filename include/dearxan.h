@@ -81,9 +81,6 @@ typedef void (*DearxanUserCallback)(const DearxanResult* result, void* opaque);
 /// 
 /// Handles SteamStub 3.1 possibly being applied on top of Arxan.
 /// 
-/// # Panics
-/// If called more than once.
-/// 
 /// # Safety
 /// This function must be called before the game's entry point runs. It is
 /// generally safe to call from within DllMain.
@@ -199,9 +196,6 @@ using DearxanUserCallback = std::function<void(const DearxanResult&)>;
 /// It can be used to initialize hooks/etc.
 /// 
 /// Handles SteamStub 3.1 possibly being applied on top of Arxan.
-/// 
-/// # Panics
-/// If called more than once.
 /// 
 /// # Safety
 /// This function must be called before the game's entry point runs. It is

@@ -31,7 +31,10 @@ unsafe fn runs_before_entry_point() {
     use dearxan::disabler::neuter_arxan;
 
     neuter_arxan(|result| {
-        println!("Arxan disabled!");
+        match result {
+            Ok(_status) => println!("Arxan disabled!"),
+            Err(e) => println!("{e}\nFailed to disable Arxan!"),
+        }
         // This is a good place to do your hooks.
         // Once this callback returns, the game's true entry point
         // will be invoked.
@@ -39,9 +42,32 @@ unsafe fn runs_before_entry_point() {
 }
 ```
 
+## From C++
+
+Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and link to it. Include `include/dearxan.h` and call `dearxan::neuter_arxan` before the game's entry point runs:
+
+```C++
+#include <iostream>
+
+#include "include/dearxan.h"
+
+void runs_before_entry_point() {
+    dearxan::neuter_arxan([](const dearxan::DearxanResult& result) {
+        if (result.status() == dearxan::DearxanStatus::DearxanSuccess) {
+            std::cout << "Arxan disabled!\n";
+        } else {
+            std::cout << result.error_msg() << '\n';
+            std::cout << "Failed to disable Arxan!\n";
+        }
+    });
+}
+```
+
+Note that the minimal supported C++ standard is C++14, although C++17 and above are recommended.
+
 ## From another language
 
-Download the static library from the [Release](https://github.com/tremwil/dearxan/releases) page and link to it. Generate C bindings according to `include/dearxan.h` and call `dearxan_neuter_arxan` before the game's entry point runs.
+Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and link to it. Generate C bindings according to `include/dearxan.h` and call `dearxan_neuter_arxan` before the game's entry point runs.
 
 ## Writing your own patcher
 
