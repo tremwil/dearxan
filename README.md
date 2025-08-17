@@ -22,7 +22,7 @@ It may not work with the Arxan configurations used by other game developers. Tha
 
 Add the following to your `Cargo.toml`:
 ```toml
-dearxan = "0.1.0"
+dearxan = "0.3.0"
 ```
 
 Then, simply call the `dearxan::disabler::neuter_arxan` function once before the entry point of the game is executed: 
