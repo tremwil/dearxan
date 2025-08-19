@@ -141,7 +141,8 @@ impl ArxanPatch {
             let mut i_reloc = relocs.into_iter().peekable();
             for (rva, bytes) in &mut writes {
                 while let Some(reloc) = i_reloc.next_if(|r| r + 8 <= *rva + bytes.len() as u32) {
-                    let Some(offset) = reloc.checked_sub(*rva).map(|r| r as usize) else {
+                    let Some(offset) = reloc.checked_sub(*rva).map(|r| r as usize)
+                    else {
                         continue;
                     };
                     let target_bytes = &mut bytes[offset..offset + 8];
