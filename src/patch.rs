@@ -74,7 +74,7 @@ impl ArxanPatch {
         let analyzed_stubs = analyzed_stubs.into_iter();
 
         let mut decrypt_conflicts: FxHashMap<u32, Vec<&EncryptedRegionList>> = FxHashMap::default();
-        let mut patches = Vec::with_capacity(analyzed_stubs.size_hint().0);
+        let mut hooks = Vec::with_capacity(analyzed_stubs.size_hint().0);
 
         for stub in analyzed_stubs {
             if let Some(rlist) = &stub.encrypted_regions
@@ -82,7 +82,7 @@ impl ArxanPatch {
             {
                 decrypt_conflicts.entry(r.rva).or_default().push(rlist)
             }
-            patches.push(ArxanPatch::JmpHook {
+            hooks.push(ArxanPatch::JmpHook {
                 target: stub.test_rsp_va,
                 pic: assemble_stub_patch(stub)?,
             })
@@ -126,41 +126,41 @@ impl ArxanPatch {
         }
 
         // Handle relocs to decrypted regions, if necessary
-        match preferred_base {
-            Some(preferred) if preferred != actual_base => {
-                // Use a mergesort like pass to match regions with their relocs
-                writes.sort_by_key(|(rva, _)| *rva);
+        if let Some(preferred) = preferred_base
+            && preferred != actual_base
+        {
+            // Use a mergesort like pass to match regions with their relocs
+            writes.sort_by_key(|(rva, _)| *rva);
 
-                // Usually, PE relocs are in the right order, but we don't guarantee this
-                let mut relocs: Vec<_> =
-                    image.relocs64().map_err(|_| PatchGenError::RelocsCorrupted)?.collect();
-                relocs.sort();
+            // Usually, PE relocs are in the right order, but we don't guarantee this
+            let mut relocs: Vec<_> =
+                image.relocs64().map_err(|_| PatchGenError::RelocsCorrupted)?.collect();
+            relocs.sort();
 
-                let reloc_offset = actual_base.wrapping_sub(preferred);
-                let mut i_reloc = relocs.into_iter().peekable();
-                for (rva, mut bytes) in writes {
-                    while let Some(reloc) = i_reloc.next_if(|r| r + 8 <= rva + bytes.len() as u32) {
-                        let Some(offset) = reloc.checked_sub(rva).map(|r| r as usize)
-                        else {
-                            continue;
-                        };
-                        let target_bytes = &mut bytes[offset..offset + 8];
-                        let target: u64 = bytemuck::pod_read_unaligned(target_bytes);
-                        let adjusted = target.wrapping_add(reloc_offset);
-                        target_bytes.copy_from_slice(bytemuck::bytes_of(&adjusted));
-                        log::trace!("applied reloc at {:x} (in patch at rva {:x})", reloc, rva)
-                    }
-                    patches.push(ArxanPatch::Write {
-                        va: actual_base + rva as u64,
-                        bytes,
-                    })
+            let reloc_offset = actual_base.wrapping_sub(preferred);
+            let mut i_reloc = relocs.into_iter().peekable();
+            for (rva, bytes) in &mut writes {
+                while let Some(reloc) = i_reloc.next_if(|r| r + 8 <= *rva + bytes.len() as u32) {
+                    let Some(offset) = reloc.checked_sub(*rva).map(|r| r as usize) else {
+                        continue;
+                    };
+                    let target_bytes = &mut bytes[offset..offset + 8];
+                    let target: u64 = bytemuck::pod_read_unaligned(target_bytes);
+                    let adjusted = target.wrapping_add(reloc_offset);
+                    target_bytes.copy_from_slice(bytemuck::bytes_of(&adjusted));
+                    log::trace!("applied reloc at {:x} (in patch at rva {:x})", reloc, rva)
                 }
             }
-            _ => patches.extend(writes.into_iter().map(|(rva, bytes)| ArxanPatch::Write {
+        }
+
+        let patches = writes
+            .into_iter()
+            .map(|(rva, bytes)| ArxanPatch::Write {
                 va: actual_base + rva as u64,
                 bytes,
-            })),
-        }
+            })
+            .chain(hooks)
+            .collect();
 
         // Create a write patch for every reloc in the exe
         // TODO: Use a mergesort like algorithm to intersect decrypted regions and relocs
