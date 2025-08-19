@@ -3,7 +3,7 @@ resolver = "2"
 members = ["test_dll", "test_launcher", "test_utils"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 authors = ["William Tremblay"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -65,7 +65,7 @@ features = [
 simplelog.workspace = true
 clap.workspace = true
 clap-num = "1.2"
-dearxan-test-utils = { version = "0.3.0", path = "test_utils" }
+dearxan-test-utils = { version = "0.3.1", path = "test_utils" }
 iced-x86 = { version = "1.21", features = ["code_asm"] }
 pretty-hex = "0.4.1"
 
