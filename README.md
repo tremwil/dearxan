@@ -22,7 +22,7 @@ It may not work with the Arxan configurations used by other game developers. Tha
 
 Add the following to your `Cargo.toml`:
 ```toml
-dearxan = "0.3.0"
+dearxan = "0.3.1"
 ```
 
 Then, simply call the `dearxan::disabler::neuter_arxan` function once before the entry point of the game is executed: 
@@ -127,4 +127,4 @@ The crate comes with the following feature flags:
 
 # Credits
 
-Many thanks to [dasaav](https://github.com/Dasaav-dsv/) for helping me reverse engineer how Arxan stores the regions of memory to decrypt and for finding the encryption algorithm they used (32-round TEA).
+Many thanks to [dasaav](https://github.com/Dasaav-dsv/) for implementing global synchronization for `neuter_arxan` ad well as helping me reverse engineer how Arxan stores the regions of memory to decrypt and for finding the encryption algorithm they used (32-round TEA).
