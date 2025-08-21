@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     mem::{ManuallyDrop, MaybeUninit, needs_drop, transmute, transmute_copy},
     ops::{Deref, DerefMut},
 };
@@ -26,6 +27,10 @@ impl<T, const N: usize> StackVec<T, N> {
             buf: unsafe { transmute_copy(&ManuallyDrop::new(buf)) },
             len: N,
         }
+    }
+
+    pub const fn from_elem(elem: T) -> Self {
+        Self::from_array([elem])
     }
 
     pub const fn from_array<const M: usize>(array: [T; M]) -> Self {
@@ -121,8 +126,29 @@ impl<T, const N: usize> StackVec<T, N> {
 }
 
 impl<T: Copy, const N: usize> StackVec<T, N> {
+    pub fn extend_from_slice(&mut self, slice: &[T]) {
+        let new_len = match self.len().checked_add(slice.len()) {
+            Some(l) if l <= N => l,
+            _ => panic!("StackVec max capacity exceeded"),
+        };
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                slice.as_ptr(),
+                self.buf.as_mut_ptr().cast(),
+                slice.len(),
+            );
+            self.set_len(new_len);
+        }
+    }
+
+    pub fn from_slice(slice: &[T]) -> Self {
+        let mut vec = Self::new();
+        vec.extend_from_slice(slice);
+        vec
+    }
+
     /// Optimized version of [`StackVec::clone`] when `T` is [`Copy`].
-    fn copy(&self) -> Self {
+    pub fn copy(&self) -> Self {
         unsafe { Self::from_raw_parts(self.buf, self.len) }
     }
 }
@@ -178,6 +204,13 @@ impl<T: Clone, const N: usize> Clone for StackVec<T, N> {
     }
 }
 
+impl<T: Debug, const N: usize> Debug for StackVec<T, N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("StackVec<{N}> "))?;
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
 impl<T, const N: usize> IntoIterator for StackVec<T, N> {
     type Item = T;
 
@@ -192,6 +225,26 @@ impl<T, const N: usize> IntoIterator for StackVec<T, N> {
         // SAFETY: we only read the first `len` elements of the buffer
         let buf = unsafe { (&manually_drop.buf as *const [MaybeUninit<T>; N]).read() };
         buf.into_iter().take(len).map(|v| unsafe { v.assume_init() })
+    }
+}
+
+impl<'a, T, const N: usize> IntoIterator for &'a StackVec<T, N> {
+    type Item = &'a T;
+
+    type IntoIter = <&'a [T] as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T, const N: usize> IntoIterator for &'a mut StackVec<T, N> {
+    type Item = &'a mut T;
+
+    type IntoIter = <&'a mut [T] as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
     }
 }
 
