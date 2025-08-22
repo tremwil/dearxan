@@ -2,6 +2,8 @@ use std::mem::transmute_copy;
 
 use windows_sys::Win32::System::Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect};
 
+use crate::disabler::util;
+
 pub struct CallHook<F: Copy> {
     imm_ptr: *mut i32,
     original: F,
@@ -34,36 +36,9 @@ impl<F: Copy> CallHook<F> {
     }
 
     pub unsafe fn hook_with(&self, new_target: F) {
-        let mut old_protect = Default::default();
-
         let address: isize = unsafe { transmute_copy(&new_target) };
         let imm: i32 = address.wrapping_sub_unsigned(self.imm_ptr.addr() + 4).try_into().unwrap();
-
-        if unsafe {
-            VirtualProtect(
-                self.imm_ptr as *const _,
-                size_of_val(&imm),
-                PAGE_EXECUTE_READWRITE,
-                &mut old_protect,
-            )
-        } == 0
-        {
-            panic!("VirtualProtect failed to make patch area RWX");
-        }
-
-        unsafe { self.imm_ptr.write_unaligned(imm) };
-
-        if unsafe {
-            VirtualProtect(
-                self.imm_ptr as *const _,
-                size_of_val(&imm),
-                old_protect,
-                &mut old_protect,
-            )
-        } == 0
-        {
-            panic!("VirtualProtect failed to restore patch area protection flags");
-        }
+        unsafe { util::with_rwx_ptr(self.imm_ptr, |p| p.write_unaligned(imm)) }
     }
 
     pub unsafe fn unhook(&self) {
