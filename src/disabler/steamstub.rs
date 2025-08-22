@@ -38,20 +38,103 @@ use super::{call_hook::CallHook, game::game};
 /// Takes PE entry point and returns original entry point.
 pub type SteamStub31Main = unsafe extern "C" fn(u64) -> u64;
 
-/// Finds the main steamstub 3.1 unpacking function in the PE, if present.
+#[bitfield_struct::bitfield(u32)]
+struct SteamDrmFlags {
+    _unused_0: bool,
+    no_module_verification: bool,
+    no_encryption: bool,
+    _unused_1: bool,
+    no_ownership_check: bool,
+    no_debugger_check: bool,
+    no_error_dialog: bool,
+    #[bits(25)]
+    _unused_2: u32,
+}
+
+impl SteamDrmFlags {
+    pub fn clear_protection_flags(&mut self) {
+        self.set_no_module_verification(true);
+        self.set_no_ownership_check(true);
+        self.set_no_debugger_check(true);
+    }
+}
+
+/// SteamStub 3.1 header data.
+///
+/// Derived from atom0s's [Steamless](https://github.com/atom0s/Steamless/blob/master/Steamless.Unpacker.Variant31.x64/Classes/SteamStubHeader.cs)
+/// source code.
+#[repr(C)]
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+struct SteamStubHeader {
+    xor_key: u32,
+    signature: u32,
+    image_base: u64,
+    drm_entry_point: u64,
+    bind_section_rva: u32,
+    bind_section_code_size: u32,
+    original_entry_point: u64,
+    unk0: u32,
+    payload_data_size: u32,
+    drmp_dll_rva: u32,
+    drmp_dll_size: u32,
+    steam_app_id: u32,
+    drm_flags: SteamDrmFlags,
+    bind_section_virtual_size: u32,
+    unknown_hash: u32,
+    code_section_virtual_address: u64,
+    code_section_size: u64,
+    aes_key: [u8; 32],
+    aes_iv: [u8; 16],
+    code_section_bytes: [u8; 16],
+    drmp_xtea_key: [u32; 4],
+    unk1: [u32; 8],
+    get_module_handle_a_rva: u64,
+    get_module_handle_w_rva: u64,
+    load_library_a_rva: u64,
+    load_library_w_rva: u64,
+    get_proc_address_rva: u64,
+}
+
+unsafe impl bytemuck::Zeroable for SteamStubHeader {}
+unsafe impl bytemuck::Pod for SteamStubHeader {}
+unsafe impl pelite::Pod for SteamStubHeader {}
+
+impl SteamStubHeader {
+    const EXPECTED_SIGNATURE: u32 = 0xC0DEC0DF;
+
+    /// Reads the encrypted SteamStub header from a PE file SteamStub was applied to.
+    ///
+    /// To decrypt the header, make a copy and call [`Self::decrypt`].
+    pub fn from_pe_encrypted(pe: PeView<'_>) -> Option<&Self> {
+        const HEADER_SIZE: u32 = size_of::<SteamStubHeader>() as u32;
+
+        let entry_rva = pe.optional_header().AddressOfEntryPoint;
+        let encrypted: &Self = pe.derva(entry_rva - HEADER_SIZE).ok()?;
+        (encrypted.xor_key ^ encrypted.signature == Self::EXPECTED_SIGNATURE).then_some(encrypted)
+    }
+
+    pub fn decrypt(&mut self) {
+        let mut key = self.xor_key;
+        let blocks: &mut [u32] = bytemuck::cast_slice_mut(bytemuck::bytes_of_mut(self));
+        for block in blocks {
+            let new_key = *block;
+            *block ^= key;
+            key = new_key;
+        }
+    }
+}
+
+/// Finds the main steamstub 3.1 unpacking function in the PE.
+///
+/// This function *assumes* that SteamStub 3.1 is present, which can be checked
+/// using [`SteamStubHeader::from_pe_encrypted`]
 ///
 /// Returns the address of the call instruction invoking the function, as
 /// well as the address of the function itself.
 pub fn find_steamstub31_main(pe: PeView<'_>) -> Option<(u64, u64)> {
-    const STEAMSTUB_HEADER_SIZE: u32 = 0xF0;
-    const EXPECTED_SIGNATURE: u32 = 0xC0DEC0DF;
-
     let entry_rva = pe.optional_header().AddressOfEntryPoint;
     let base = pe.optional_header().ImageBase;
-    let [key, sig] = pe.derva::<[u32; 2]>(entry_rva - STEAMSTUB_HEADER_SIZE).ok()?;
-    if key ^ sig != EXPECTED_SIGNATURE {
-        return None;
-    }
 
     // Walk through SteamStub context save until we get to the call
     let mut decoder = Decoder::new(64, pe.image(), DecoderOptions::NONE);
@@ -86,14 +169,6 @@ pub fn find_steamstub31_main(pe: PeView<'_>) -> Option<(u64, u64)> {
 /// # Panics
 /// If called more than once.
 ///
-/// <div class="warning">
-///
-/// Note this function is called by [`schedule_after_arxan`](super::schedule_after_arxan)
-/// and [`neuter_arxan`](super::neuter_arxan), both of which can only be called once.
-/// Hence all three are mutually exclusive.
-///
-/// </div>
-///
 /// # Safety
 /// This should only be called before the game's entry point is executed.
 pub unsafe fn schedule_after_steamstub(callback: impl FnOnce(*const u8, bool) + Send + 'static) {
@@ -107,12 +182,20 @@ pub unsafe fn schedule_after_steamstub(callback: impl FnOnce(*const u8, bool) + 
     let opt_header = game.pe.optional_header();
     let entry_point = opt_header.ImageBase + opt_header.AddressOfEntryPoint as u64;
 
-    let Some((call_ptr, _)) = find_steamstub31_main(game.pe)
+    let Some(header) = SteamStubHeader::from_pe_encrypted(game.pe)
     else {
         log::debug!("SteamStub not detected, running callback immediately");
         callback(entry_point as *const _, false);
         return;
     };
+
+    let mut decrypted_header = *header;
+    decrypted_header.decrypt();
+    log::debug!("{decrypted_header:#x?}");
+    decrypted_header.drm_flags.clear_protection_flags();
+
+    let (call_ptr, _) =
+        find_steamstub31_main(game.pe).expect("failed to find SteamStub main unpacking routine");
 
     log::debug!("SteamStub detected, CALL to unpacking routine: {call_ptr:016x}");
     let call_hook = &*Box::leak(Box::new(unsafe {
