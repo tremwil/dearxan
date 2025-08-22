@@ -50,6 +50,7 @@ mod lazy_global;
 pub mod result;
 mod slist;
 mod steamstub;
+mod util;
 
 use code_buffer::CodeBuffer;
 use game::game;
