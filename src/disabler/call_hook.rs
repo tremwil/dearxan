@@ -1,7 +1,5 @@
 use std::mem::transmute_copy;
 
-use windows_sys::Win32::System::Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect};
-
 use crate::disabler::util;
 
 pub struct CallHook<F: Copy> {
