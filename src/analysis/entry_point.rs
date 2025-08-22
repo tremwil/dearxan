@@ -81,6 +81,7 @@ pub fn is_arxan_hooked_entry_point(
 ///
 /// The binary must have at least a few 10s of stack-protected functions for the analysis to be
 /// successful.
+#[allow(dead_code)]
 pub fn find_security_cookie_va(image: impl ImageView) -> Option<u64> {
     use memchr::memmem;
 
