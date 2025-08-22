@@ -137,7 +137,7 @@ impl<'a> SteamStubContext<'a> {
         pe: PeView<'a>,
         encrypted_header: &'a SteamStubHeader,
     ) -> pelite::Result<Self> {
-        let mut header = encrypted_header.clone();
+        let mut header = *encrypted_header;
         let strings_table_key = header.decrypt();
 
         Ok(Self {
@@ -176,7 +176,7 @@ impl<'a> SteamStubContext<'a> {
 
     /// Re-encrypt the header and strings table.
     pub fn re_encrypt(&self) -> (SteamStubHeader, Vec<u8>) {
-        let mut encrypted = self.header.clone();
+        let mut encrypted = self.header;
         let mut encrypted_strings = self.decrypted_strings.clone();
 
         let mut key = 0;
@@ -338,7 +338,7 @@ pub unsafe fn schedule_after_steamstub(callback: impl FnOnce(*const u8, bool) + 
     })
     .leak();
 
-    steamstub_ctx.header.original_entry_point = (bare_callback as u64).wrapping_sub(base);
+    steamstub_ctx.header.original_entry_point = (bare_callback as usize as u64).wrapping_sub(base);
 
     steamstub_ctx.recompute_hash().unwrap();
     let (new_header, new_strings) = steamstub_ctx.re_encrypt();
