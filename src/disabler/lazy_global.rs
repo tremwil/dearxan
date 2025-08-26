@@ -43,6 +43,7 @@ macro_rules! lazy_global {
             });
     }
 }
+pub(crate) use lazy_global;
 
 impl<T> LazyGlobal<T> {
     #[doc(hidden)]
