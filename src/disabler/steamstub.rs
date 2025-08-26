@@ -4,35 +4,27 @@
 //! the binary's original entry point (which in DS3's case will be the Arxan entry point)
 //! to then apply the arxan patches on that one.
 //!
-//! Detouring SteamStub is fairly straightforward. The structure of a stubbed entry point
-//! is as follows:
+//! Neutering SteamStub 3.1 is fairly straightforward. It stores its context in a global header
+//! under the executable's entry point. This context is obfuscated using a simple running XOR
+//! encryption scheme. Among other things, this context includes, the original entry point of the
+//! executable, offsets to a table of null-terminated function and module string names, offsets to
+//! an encrypted manually-mapped DLL called `steam_drmp.dll`, a set of DRM configuration flags and
+//! an integrity hash.
 //!
-//! ```x86asm
-//! CALL steamstub_entry
-//! steamstub_entry:
-//! {push general purpose registers}
-//! {align RSP}
-//! CALL steamstub_main
-//! {write RAX to call return address}
-//! {pop general purpose registers}
-//! RET
-//! ```
-//!
-//! `steamstub_main` performs code integrity checks, so we can't simply hook it.
-//! However, we can do the following:
-//! 1. Hook at the first CALL
-//! 2. Follow `steamstub_entry` until we get to the second call
-//! 3. Call it ourselves with the usual MSVC x64 calling convention
-//! 4. We now have the original (Arxan) entry point as the return value!
-//!
-//! Which makes it quite easy to work around.
+//! To detour SteamStub and simultaneously neuter its capabilities, we clear all anti tamper/debug
+//! flags from the header, replace the original entry point field with our own, and recompute the
+//! integrity hash.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 
 use closure_ffi::BareFnOnce;
 use pelite::pe64::{Pe, PeView};
 
 use super::{game::game, util};
+use crate::disabler::entry_point::{is_created_suspended, process_main_thread, wait_for_gs_cookie};
 
 #[derive(Default, Debug, Clone, Copy)]
 struct SteamDrmHasher {
@@ -286,23 +278,43 @@ impl SteamStubHeader {
     }
 }
 
-/// Schedule a callback to run after SteamStub 3.1 finishes unpacking the game.
-/// It runs immediately if SteamStub was not detected.
+#[derive(Debug, Clone, Copy)]
+pub struct SteamstubStatus {
+    pub original_entry_point: u64,
+    pub blocking_entry_point: bool,
+    pub is_present: bool,
+}
+
+/// If present, patches the SteamStub 3.1 header so that all anti-tamper protections are disabled,
+/// then invokes `callback` once SteamStub finishes to unpack the game.
 ///
-/// The callback receives the following:
-/// - a pointer original entry point before SteamStub was applied to the executable
-/// - a boolean indicating whether SteamStub 3.1 was detected
+/// The callback runs immediately if SteamStub is not detected.
+///
+/// If SteamStub is detected, the callback is *almost* guaranteed to execute after the unpacking
+/// routine has finished. When the function is called before the process entry point runs, this
+/// blocks said entry point until the callback has ran. When called after, it runs in another thread
+/// which synchronizes with the entry point using the value of the GS cookie. On non-MSVC
+/// toolchains, the analysis for identifying the cookie value may fail and result in the program
+/// taking a conservative, arbitrary wait instead.
+///
+/// The callback receives a [`SteamstubStatus`] struct which it can use to determine the original
+/// program entry point before SteamStub was applied, whether SteamStub is present, and whether
+/// entry point execution is being blocked.
 ///
 /// # Panics
 /// If called more than once.
 ///
 /// # Safety
-/// This should only be called before the game's entry point is executed.
-pub unsafe fn schedule_after_steamstub(callback: impl FnOnce(*const u8, bool) + Send + 'static) {
+/// When run before the process entry point, this function patches the SteamStub headers and
+/// replaces the OEP value in said header. As such, it can race with code that attempts to do the
+/// same thing.
+pub unsafe fn neuter_steamstub(callback: impl FnOnce(SteamstubStatus) + Send + 'static) {
     static CALLED: AtomicBool = AtomicBool::new(false);
     if CALLED.swap(true, Ordering::Relaxed) {
         panic!("schedule_after_steamstub must not be called more than once");
     }
+
+    let blocking = process_main_thread().is_none_or(|t| is_created_suspended(t));
 
     let game = game();
     let base = game.pe.optional_header().ImageBase;
@@ -312,7 +324,11 @@ pub unsafe fn schedule_after_steamstub(callback: impl FnOnce(*const u8, bool) + 
     let mut steamstub_ctx = match SteamStubContext::from_pe(game.pe) {
         None => {
             log::debug!("SteamStub not detected, running callback immediately");
-            callback(entry_point as *const _, false);
+            callback(SteamstubStatus {
+                is_present: false,
+                original_entry_point: entry_point,
+                blocking_entry_point: blocking,
+            });
             return;
         }
         Some(Ok(ctx)) => ctx,
@@ -320,6 +336,23 @@ pub unsafe fn schedule_after_steamstub(callback: impl FnOnce(*const u8, bool) + 
     };
 
     log::debug!("SteamStub detected");
+
+    let original_entry_point = base + steamstub_ctx.header.original_entry_point;
+    if !blocking {
+        std::thread::spawn(move || {
+            if let Err(err) = unsafe { wait_for_gs_cookie(None) } {
+                log::warn!("failed to wait for entry point initialization: {err}");
+                log::warn!("sleeping for an arbitrary period instead");
+                std::thread::sleep(Duration::from_secs(1));
+            }
+            callback(SteamstubStatus {
+                original_entry_point,
+                blocking_entry_point: false,
+                is_present: true,
+            })
+        });
+        return;
+    }
 
     log::debug!(
         "clearing SteamStub protection flags, original values: {:#?}",
@@ -329,10 +362,12 @@ pub unsafe fn schedule_after_steamstub(callback: impl FnOnce(*const u8, bool) + 
 
     log::debug!("swapping steamstub header OEP with user callback");
 
-    let original_entry_point = base + steamstub_ctx.header.original_entry_point;
-
     let bare_callback = BareFnOnce::new_c(move || {
-        callback(original_entry_point as *const _, true);
+        callback(SteamstubStatus {
+            original_entry_point,
+            blocking_entry_point: blocking,
+            is_present: true,
+        });
         let ep_call: extern "C" fn() -> u64 = unsafe { std::mem::transmute(original_entry_point) };
         ep_call()
     })

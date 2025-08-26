@@ -1,6 +1,6 @@
 mod cfg;
 mod encryption;
-mod entry_point;
+pub mod entry_point;
 mod stub_info;
 mod vm;
 
@@ -36,7 +36,6 @@ pub mod internal {
 
 pub use self::{
     encryption::{EncryptedRegion, EncryptedRegionList, shannon_entropy},
-    entry_point::is_arxan_hooked_entry_point,
     stub_info::{ReturnGadget, StubAnalysisError, StubAnalyzer, StubInfo},
     vm::{ImageView, image::WithBase},
 };
