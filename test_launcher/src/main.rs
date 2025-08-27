@@ -94,6 +94,9 @@ struct CliArgs {
 
     #[arg(short, long, help = "Instrument Arxan stub invocations")]
     instrument_stubs: bool,
+
+    #[arg(long, help = "Do not create the process as suspended")]
+    nosuspend: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -166,7 +169,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             None,
             None,
             true,
-            CREATE_SUSPENDED,
+            if args.nosuspend { Default::default() } else { CREATE_SUSPENDED },
             None,
             PCSTR(game_dir_cstr.as_ptr() as *const _),
             &startup,
@@ -194,7 +197,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::thread::sleep(Duration::from_secs_f64(delay));
     }
 
-    if args.wait_for_input {
+    if args.wait_for_input && !args.nosuspend {
         log::info!("Press enter to resume process. Output will appear below.");
         let _ = std::io::stdin().read_line(&mut String::new());
     }
