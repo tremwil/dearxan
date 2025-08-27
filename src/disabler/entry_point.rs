@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use pelite::pe::Pe;
+use pelite::pe64::Pe;
 use windows_sys::Win32::{
     Foundation::{HANDLE, NTSTATUS},
     System::{
@@ -163,8 +163,10 @@ pub fn process_main_thread() -> Option<HANDLE> {
 }
 
 pub fn is_created_suspended(thread: HANDLE) -> bool {
-    let mut context = CONTEXT::default();
-    context.ContextFlags = CONTEXT_FULL_AMD64;
+    let mut context = CONTEXT {
+        ContextFlags: CONTEXT_FULL_AMD64,
+        ..Default::default()
+    };
 
     if unsafe { GetThreadContext(thread, &mut context) } == 0 {
         return false;
