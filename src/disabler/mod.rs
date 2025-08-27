@@ -254,7 +254,7 @@ where
         unsafe {
             neuter_steamstub(move |result| {
                 let Some(msvc_ep) =
-                    MsvcEntryPoint::try_from_va(game().pe, result.original_entry_point as u64)
+                    MsvcEntryPoint::try_from_va(game().pe, result.original_entry_point)
                 else {
                     log::warn!(
                         "non-msvc entry point detected. Assuming Arxan was not applied to this binary"
@@ -319,7 +319,7 @@ where
     ctx.callbacks.push(bare_callback.leak());
     CALLBACK_PUSHED.call_once(|| {});
 
-    if process_main_thread().is_some_and(|t| !is_created_suspended(t)) {
+    if !process_main_thread().is_none_or(is_created_suspended) {
         log::warn!("schedule_after_arxan run after the process entry point");
         log::warn!("callbacks will race with game initialization");
 
