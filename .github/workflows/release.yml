@@ -14,7 +14,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
 
-      - run: cargo +nightly -Z package-workspace publish --dry-run -p dearxan -p dearxan-test-utils
+      - name: Ensure changelog has notes for release
+        run: python ./.github/scripts/release_notes.py
+
+      - name: Publish dry-run
+        run: cargo +nightly -Z package-workspace publish --dry-run -p dearxan -p dearxan-test-utils
 
   publish:
     if: github.event_name == 'push'
@@ -27,20 +31,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
 
-      - name: Create dist foler
-        run: |
-          New-Item -ItemType Directory -Force -Path ./target/dist/lib
-          cp -R ./include ./target/dist
-
-      - name: Build static lib (debug)
-        run: |
-          cargo build -F ffi
-          mv ./target/debug/dearxan.lib ./target/dist/lib/dearxan-debug.lib
-
-      - name: Build static lib (release)
-        run: |
-          cargo build --release -F ffi
-          mv ./target/release/dearxan.lib ./target/dist/lib/dearxan-release.lib
+      - name: Make static library dist
+        run: python ./.github/scripts/build_dist_archive.py
 
       - name: crates.io publish
         run: cargo +nightly -Z package-workspace publish -p dearxan -p dearxan-test-utils --token ${{ secrets.CRATES_IO_TOKEN }}
@@ -51,9 +43,6 @@ jobs:
           $version = python ./.github/scripts/package_version.py
           echo "version=$version" >> "$env:GITHUB_OUTPUT"
 
-      - name: Zip release
-        run: Compress-Archive -Path ./target/dist -DestinationPath "dearxan-${{ steps.get_version.outputs.version }}.zip"
-
       - name: Generate release notes
         run: python ./.github/scripts/release_notes.py > release-notes.md
 
@@ -61,5 +50,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.get_version.outputs.version }}
-          files: dearxan-${{  steps.get_version.outputs.version }}.zip
+          files: target/dearxan-${{  steps.get_version.outputs.version }}.zip
           body_path: release-notes.md
