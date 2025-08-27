@@ -126,7 +126,7 @@ impl SuspendGuard {
             let current_thread = GetCurrentThreadId();
 
             let suspended = iter_threads(Some(THREAD_SUSPEND_RESUME | THREAD_QUERY_INFORMATION))
-                .filter(|&h| GetThreadId(h) != current_thread && SuspendThread(h) != 0)
+                .filter(|&h| GetThreadId(h) != current_thread && SuspendThread(h) != u32::MAX)
                 .collect();
 
             Self { suspended }
