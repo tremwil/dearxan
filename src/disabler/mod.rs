@@ -97,26 +97,7 @@ where
 
     // Backwards compatibility jank -- we should have made `lazy_global`
     // function more like a `LazyLock` whose constructor takes an argument
-    static IS_BLOCKING: AtomicBool = AtomicBool::new(false);
-
-    let on_after_arxan = move |is_present, is_executing_entrypoint| unsafe {
-        IS_BLOCKING.store(is_executing_entrypoint, Ordering::SeqCst);
-        let result = if is_present {
-            result::from_maybe_panic(|| {
-                ffi::DearxanResult::from_global(&DEARXAN_NEUTER_ARXAN_RESULT).into()
-            })
-        }
-        else {
-            Ok(Status {
-                is_arxan_detected: false,
-                is_executing_entrypoint,
-            })
-        };
-        callback(result.map(|s| Status {
-            is_executing_entrypoint,
-            ..s
-        }));
-    };
+    static NEEDS_SUSPEND: AtomicBool = AtomicBool::new(false);
 
     unsafe fn neuter_arxan_inner() -> Result<Status, Box<dyn std::error::Error + Send + Sync>> {
         static CALLED: AtomicBool = AtomicBool::new(false);
@@ -124,7 +105,7 @@ where
             panic!("neuter_arxan_inner must not be called more than once");
         }
 
-        let _suspend_guard: Option<entry_point::SuspendGuard> = IS_BLOCKING
+        let _suspend_guard: Option<entry_point::SuspendGuard> = NEEDS_SUSPEND
             .load(Ordering::SeqCst)
             .then(|| unsafe { entry_point::SuspendGuard::suspend_all_threads() });
 
@@ -178,7 +159,6 @@ where
             "all patches applied in {:.3?}. Arxan is now neutered",
             patch_apply_time.elapsed()
         );
-        log::debug!("invoking user callback");
 
         Ok(Status {
             is_arxan_detected: true,
@@ -186,7 +166,28 @@ where
         })
     }
 
-    unsafe { schedule_after_arxan(on_after_arxan) };
+    unsafe {
+        schedule_after_arxan(move |is_present, is_executing_entrypoint: bool| {
+            NEEDS_SUSPEND.store(!is_executing_entrypoint, Ordering::SeqCst);
+            let result = if is_present {
+                result::from_maybe_panic(|| {
+                    ffi::DearxanResult::from_global(&DEARXAN_NEUTER_ARXAN_RESULT).into()
+                })
+            }
+            else {
+                Ok(Status {
+                    is_arxan_detected: false,
+                    is_executing_entrypoint,
+                })
+            };
+
+            log::debug!("invoking user callback");
+            callback(result.map(|s| Status {
+                is_executing_entrypoint,
+                ..s
+            }));
+        })
+    };
 }
 
 /// Schedule a callback to run right after the Arxan entry point stub terminates, in lockstep with
