@@ -59,7 +59,9 @@ jobs:
   
   build_static_library:
     name: Build and package static library into artifact
-
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      pull-requests: write
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
