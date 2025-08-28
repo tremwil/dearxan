@@ -21,7 +21,7 @@ libs = [lib for m in messages for lib in m.split(" ")[1:] if m.startswith("nativ
 print("linked static libraries:", libs)
 
 WIN_SDKS_PATH = "C:\\Program Files (x86)\\Windows Kits\\10\\Lib"
-latest_sdk_ver = max(os.listdir(WIN_SDKS_PATH))
+latest_sdk_ver = max(d for d in os.listdir(WIN_SDKS_PATH) if d.startswith("10."))
 print("pulling static libraries from Windows SDK:", latest_sdk_ver)
 
 libs_folder = os.path.join(WIN_SDKS_PATH, latest_sdk_ver, "um\\x64")
