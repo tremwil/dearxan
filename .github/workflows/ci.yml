@@ -66,8 +66,9 @@ jobs:
       - run: python ./.github/scripts/build_dist_archive.py
       - id: upload_dist
         uses: actions/upload-artifact@v4
+        if: github.event_name == 'pull_request'
         with:
-          name: dearxan-static-${{ github.sha }}
+          name: dearxan-static-${{ github.event.pull_request.head.sha }}
           path: target/dist/
     outputs:
       artifact-url: ${{ steps.upload_dist.outputs.artifact-url }}
@@ -95,7 +96,7 @@ jobs:
           body: |-
             ## Static library release preview
 
-            [dearxan-static-${{ github.sha }}](${{ needs.build_static_library.outputs.artifact-url }})
+            [dearxan-static-${{ github.event.pull_request.head.sha }}](${{ needs.build_static_library.outputs.artifact-url }})
 
             Note that this build artifact is only retained for 90 days.
 
