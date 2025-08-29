@@ -59,7 +59,6 @@ jobs:
   
   build_static_library:
     name: Build and package static library into artifact
-    if: github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       pull-requests: write
     runs-on: windows-latest
@@ -72,10 +71,19 @@ jobs:
         with:
           name: dearxan-static-${{ github.sha }}
           path: target/dist/
-      - uses: peter-evans/create-or-update-comment@v2
-        if: github.event_name == 'pull_request'
+
+      - if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: peter-evans/find-comment@v3
+        id: find_comment
         with:
-          issue-number: ${{ github.event.number }}
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: Static library release preview
+      - uses: peter-evans/create-or-update-comment@v4
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        with:
+          comment-id: ${{ steps.find_comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
           body: |-
             ## Static library release preview
 
