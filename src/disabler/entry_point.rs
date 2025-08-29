@@ -20,7 +20,7 @@ use windows_sys::Win32::{
     },
 };
 
-#[link(name = "ntdll", kind = "raw-dylib")]
+#[cfg_attr(target_os = "windows", link(name = "ntdll", kind = "raw-dylib"))]
 unsafe extern "C" {
     fn NtGetNextThread(
         process_handle: HANDLE,
