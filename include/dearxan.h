@@ -49,6 +49,7 @@ typedef enum DearxanStatus {
     DearxanSuccess,
     DearxanError,
     DearxanPanic,
+    DearxanMaxStatus
 } DearxanStatus;
 
 /// The outcome of a call to `dearxan_neuter_arxan`.
@@ -59,11 +60,27 @@ typedef enum DearxanStatus {
 /// To maintain ABI stability, future `dearxan` versions are not permitted to
 /// remove or reorder fields, any new fields must be added before `_last_for_offsetof`.
 typedef struct DearxanResult {
+    /// Size of this `DearxanResult` struct. 
+    ///
+    /// Only fields whose end offset fit within this size are valid for reads. Consider using
+    /// the `DEARXAN_RESULT_FIELD` macro to check this automatically.
     size_t result_size;
+    /// The status of `dearxan_neuter_arxan`.
+    ///
+    /// This is expected to be a value of `DearxanStatus`, but is non-exhaustive as other statuses
+    /// may be added in the future. As such it is typed as an `int`.
     int status;
+    /// The error or panic message, if `status` is `DearxanError` or `DearxanPanic`. 
     const char* error_msg;
+    /// The size of the error or panic message.
     size_t error_msg_size;
+    /// Whether Arxan was detected or not.
     bool is_arxan_detected;
+    /// If true, the callback execution is blocking the program entry point. If false, the callback
+    /// that received this `DearxanResult` is being executed in a separate thread.
+    ///
+    /// In either case, it is guaranteed that the Arxan entry point stub has finished initializing
+    /// once the callback runs.
     bool is_executing_entrypoint;
     char _last_for_offsetof;
 } DearxanResult;
@@ -74,16 +91,11 @@ typedef void (*DearxanUserCallback)(const DearxanResult* result, void* opaque);
 /// Single function to neuter all of Arxan's checks.
 /// 
 /// The callback will be invoked with a pointer to a `DearxanResult` containing
-/// fields indicating whether Arxan was detected and whether the entry point is
-/// currently being executed once patching is complete.
-/// 
-/// It can be used to initialize hooks/etc.
+/// fields indicating whether Arxan was detected and whether entry point execution is being
+/// blocked while the callback is running. Modulo any reported error, it is safe to assume 
+/// that Arxan has been disabled once it executes.
 /// 
 /// Handles SteamStub 3.1 possibly being applied on top of Arxan.
-/// 
-/// # Safety
-/// This function must be called before the game's entry point runs. It is
-/// generally safe to call from within DllMain.
 extern void dearxan_neuter_arxan(DearxanUserCallback callback, void* opaque);
 
 #ifdef __cplusplus
@@ -165,20 +177,31 @@ struct DearxanResult : private detail::DearxanResult {
 
         this->result_size = result_size;
     }
-
+    
+    /// The status of `dearxan_neuter_arxan`.
+    ///
+    /// This is expected to be a valid value of `DearxanStatus`, but is non-exhaustive as other statuses
+    /// may be added in the future. Hence it is recommended to compare it against `DearxanMaxStatus`.
     DearxanStatus status() const noexcept {
         return static_cast<DearxanStatus>(detail::DearxanResult::status);
     }
 
+    /// The error or panic message, if `status` is `DearxanError` or `DearxanPanic`. 
     std::string error_msg() const noexcept {
         return std::string(detail::DearxanResult::error_msg,
             detail::DearxanResult::error_msg_size);
     }
 
+    /// Whether Arxan was detected or not.
     bool is_arxan_detected() const noexcept {
         return detail::DearxanResult::is_arxan_detected;
     }
 
+    /// If true, the callback execution is blocking the program entry point. If false, the callback
+    /// that received this `DearxanResult` is being executed in a separate thread.
+    ///
+    /// In either case, it is guaranteed that the Arxan entry point stub has finished initializing
+    /// once the callback runs.
     bool is_executing_entrypoint() const noexcept {
         return detail::DearxanResult::is_executing_entrypoint;
     }
@@ -190,16 +213,11 @@ using DearxanUserCallback = std::function<void(const DearxanResult&)>;
 /// Single function to neuter all of Arxan's checks.
 /// 
 /// The callback will be invoked with a pointer to a `DearxanResult` containing
-/// fields indicating whether Arxan was detected and whether the entry point is
-/// currently being executed once patching is complete.
-///
-/// It can be used to initialize hooks/etc.
+/// fields indicating whether Arxan was detected and whether entry point execution is being
+/// blocked while the callback is running. Modulo any reported error, it is safe to assume 
+/// that Arxan has been disabled once it executes.
 /// 
 /// Handles SteamStub 3.1 possibly being applied on top of Arxan.
-/// 
-/// # Safety
-/// This function must be called before the game's entry point runs. It is
-/// generally safe to call from within DllMain.
 inline void neuter_arxan(DearxanUserCallback f) {
     auto boxed_function =
         std::make_unique<DearxanUserCallback>(std::move(f)).release();

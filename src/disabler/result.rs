@@ -5,7 +5,13 @@ pub type DearxanResult = std::result::Result<Status, Error>;
 /// The informational part of a [`DearxanResult`].
 #[derive(Clone, Debug)]
 pub struct Status {
+    /// Whether Arxan was applied to the program.
     pub is_arxan_detected: bool,
+    /// If true, the callback execution is blocking the program entry point. If false, the callback
+    /// is being executed in a separate thread.
+    ///
+    /// In either case, it is guaranteed that the Arxan entry point stub has finished initializing
+    /// once the callback runs.
     pub is_executing_entrypoint: bool,
 }
 
