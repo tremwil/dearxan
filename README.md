@@ -30,7 +30,7 @@ For Souls games compatible with [me3](https://github.com/garyttierney/me3), this
 
 Add the following to your `Cargo.toml`:
 ```toml
-dearxan = "0.3.1"
+dearxan = "0.4.0"
 ```
 
 Then, simply call the `dearxan::disabler::neuter_arxan` function once, ideally before the entry point of the game is executed: 
