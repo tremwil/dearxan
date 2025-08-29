@@ -44,7 +44,7 @@ unsafe fn runs_before_entry_point() {
 
 ## From C++
 
-Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and link to it. Include `include/dearxan.h` and call `dearxan::neuter_arxan` before the game's entry point runs:
+Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and link to it along with the included Windows import libraries. Include `include/dearxan.h` and call `dearxan::neuter_arxan` before the game's entry point runs:
 
 ```C++
 #include <iostream>
@@ -67,7 +67,7 @@ Note that the minimal supported C++ standard is C++14, although C++17 and above 
 
 ## From C
 
-Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and link to it. Include `include/dearxan.h` and call `dearxan_neuter_arxan` before the game's entry point runs:
+Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and link to it along with the included Windows import libraries. Include `include/dearxan.h` and call `dearxan_neuter_arxan` before the game's entry point runs:
 
 ```C
 #include <stdio.h>
@@ -93,7 +93,7 @@ void runs_before_entry_point() {
 
 ## From another language
 
-Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and link to it. Generate C bindings according to `include/dearxan.h` and call `dearxan_neuter_arxan` before the game's entry point runs.
+Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and  link to it along with the included Windows import libraries. Generate C bindings according to `include/dearxan.h` and call `dearxan_neuter_arxan` before the game's entry point runs.
 
 ## Writing your own patcher
 
