@@ -59,8 +59,6 @@ jobs:
   
   build_static_library:
     name: Build and package static library into artifact
-    permissions:
-      pull-requests: write
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,23 +69,33 @@ jobs:
         with:
           name: dearxan-static-${{ github.sha }}
           path: target/dist/
-
-      - if: github.event.pull_request.head.repo.full_name == github.repository
-        uses: peter-evans/find-comment@v3
+    outputs:
+      artifact-url: ${{ steps.upload_dist.outputs.artifact-url }}
+    
+  comment_static_library_artifact:
+    name: Create or update PR comment with static library build
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    needs:
+      - build_static_library
+    steps:
+      - uses: peter-evans/find-comment@v3
         id: find_comment
         with:
           issue-number: ${{ github.event.pull_request.number }}
           comment-author: 'github-actions[bot]'
           body-includes: Static library release preview
       - uses: peter-evans/create-or-update-comment@v4
-        if: github.event.pull_request.head.repo.full_name == github.repository
         with:
           comment-id: ${{ steps.find_comment.outputs.comment-id }}
           issue-number: ${{ github.event.pull_request.number }}
+          edit-mode: replace
           body: |-
             ## Static library release preview
 
-            [dearxan-static-${{ github.sha }}](${{ steps.upload_dist.outputs.artifact-url }})
+            [dearxan-static-${{ github.sha }}](${{ needs.build_static_library.outputs.artifact-url }})
 
             Note that this build artifact is only retained for 90 days.
 
