@@ -16,6 +16,14 @@ Note that this crate is only tested against the variants of Arxan present in the
 
 It may not work with the Arxan configurations used by other game developers. That said, contributions are welcome.
 
+<div class="warning">
+
+Many DLL injectors or mod launchers do not suspend the process upon creation or otherwise provide a method to execute your code before the game's entry point is invoked. The crate supports these loaders on a best-effort basis, but it is **strongly** recommended to use one that loads mods before the game's entry point runs.
+
+For Souls games compatible with [me3](https://github.com/garyttierney/me3), this crate is already integrated into mod loader itself through the`disable_arxan` profile option. If your mod already depends on me3, it is recommended to make use of this instead of using this crate from your DLL mod.
+
+</div>
+
 # Usage
 
 ## From Rust, using the `disabler` feature
@@ -25,7 +33,7 @@ Add the following to your `Cargo.toml`:
 dearxan = "0.3.1"
 ```
 
-Then, simply call the `dearxan::disabler::neuter_arxan` function once before the entry point of the game is executed: 
+Then, simply call the `dearxan::disabler::neuter_arxan` function once, ideally before the entry point of the game is executed: 
 ```rust,
 unsafe fn runs_before_entry_point() {
     use dearxan::disabler::neuter_arxan;
@@ -44,7 +52,7 @@ unsafe fn runs_before_entry_point() {
 
 ## From C++
 
-Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and link to it along with the included Windows import libraries. Include `include/dearxan.h` and call `dearxan::neuter_arxan` before the game's entry point runs:
+Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and link to it along with the included Windows import libraries. Include `include/dearxan.h` and call `dearxan::neuter_arxan`, ideally before the game's entry point runs:
 
 ```C++
 #include <iostream>
@@ -67,7 +75,7 @@ Note that the minimal supported C++ standard is C++14, although C++17 and above 
 
 ## From C
 
-Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and link to it along with the included Windows import libraries. Include `include/dearxan.h` and call `dearxan_neuter_arxan` before the game's entry point runs:
+Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and link to it along with the included Windows import libraries. Include `include/dearxan.h` and call `dearxan_neuter_arxan`, ideally before the game's entry point runs:
 
 ```C
 #include <stdio.h>
@@ -93,7 +101,7 @@ void runs_before_entry_point() {
 
 ## From another language
 
-Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and  link to it along with the included Windows import libraries. Generate C bindings according to `include/dearxan.h` and call `dearxan_neuter_arxan` before the game's entry point runs.
+Download the static library from the [Releases](https://github.com/tremwil/dearxan/releases) page and  link to it along with the included Windows import libraries. Generate C bindings according to `include/dearxan.h` and call `dearxan_neuter_arxan`, ideally before the game's entry point runs.
 
 ## Writing your own patcher
 

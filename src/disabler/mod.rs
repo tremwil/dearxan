@@ -1,9 +1,12 @@
 //! Provides utilities for neutering Arxan.
 //!
 //! <div class="warning">
+//!
 //! Many DLL injectors or mod launchers do not suspend the process upon creation or otherwise
-//! provide a method to execute your code before the game's entry point is invoked. If they
-//! are used with this module, the game will likely crash.
+//! provide a method to execute your code before the game's entry point is invoked. The crate
+//! supports these loaders on a best-effort basis, but it is **strongly** recommended to use
+//! one that loads mods before the game's entry point runs.
+//!
 //! </div>
 //!
 //! Example usage:
@@ -69,8 +72,10 @@ use lazy_global::lazy_global;
 
 /// Single function to neuter all of Arxan's checks.
 ///
-/// The callback will be invoked with a [`DearxanResult`] and can be used to initialize
-/// hooks/etc.
+/// The callback will be invoked with a [`DearxanResult`] which contains fields indicating whether
+/// Arxan was detected and whether entry point execution is being blocked while the callback is
+/// running. Modulo any reported error, it is safe to assume that Arxan has been disabled once it is
+/// executed.
 ///
 /// Handles SteamStub 3.1 possibly being applied on top of Arxan.
 ///
@@ -80,7 +85,7 @@ use lazy_global::lazy_global;
 /// Although extremely unlikely, it is theoretically possible for code to be falsely identified as
 /// an Arxan stub and incorrectly patched, which will lead to all kinds of UB.
 ///
-/// Although best-effort synchronization with the entry point is performed when this function is
+/// While best-effort synchronization with the entry point is performed when this function is
 /// called after it has started executing, it is not perfect and may lead to race conditions.
 /// For this reason it is **strongly** recommended to use a mod loader that creates the game process
 /// as suspended.
@@ -206,8 +211,10 @@ where
 ///
 /// # Safety
 ///
-/// This function must be called before the game's entry point runs. It is generally safe to call
-/// from within DllMain.
+/// This function may apply code and memory patches to the program depending on various checks,
+/// such as patching the SteamStub headers if it is present. Although it is extremely unlikely for a
+/// patch to be incorrectly applied, this is a fundamentally unsafe operation and may lead to all
+/// kinds of UB.
 pub unsafe fn schedule_after_arxan<F>(callback: F)
 where
     F: FnOnce(bool, bool) + Send + 'static,
