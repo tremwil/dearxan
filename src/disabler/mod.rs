@@ -314,12 +314,22 @@ where
         }
     }
 
+    // Only use callbacks here, as older versions of DEARXAN_SCHEDULED_AFTER_ARXAN may not have the
+    // is_present and wait_done fields
     let ctx = unsafe { &*DEARXAN_SCHEDULED_AFTER_ARXAN.0 };
     let bare_callback = BareFnOnce::new_c(callback);
     ctx.callbacks.push(bare_callback.leak());
     CALLBACK_PUSHED.call_once(|| {});
 
     if !process_main_thread().is_none_or(is_created_suspended) {
+        if DEARXAN_SCHEDULED_AFTER_ARXAN.1 < size_of::<Ctx>() {
+            log::error!(
+                "module that initialized the schedule_after_arxan state does not support post-entry-point calls"
+            );
+            log::error!("the schedule_after_arxan callback might never be run!");
+            return;
+        }
+
         log::warn!("schedule_after_arxan run after the process entry point");
         log::warn!("callbacks will race with game initialization");
 
