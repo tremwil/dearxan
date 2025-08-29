@@ -56,49 +56,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
       - run: cargo test --workspace --all-features
-  
-  build_static_library:
-    name: Build and package static library into artifact
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: python ./.github/scripts/build_dist_archive.py
-      - id: upload_dist
-        uses: actions/upload-artifact@v4
-        if: github.event_name == 'pull_request'
-        with:
-          name: dearxan-static-${{ github.event.pull_request.head.sha }}
-          path: target/dist/
-    outputs:
-      artifact-url: ${{ steps.upload_dist.outputs.artifact-url }}
-    
-  comment_static_library_artifact:
-    name: Create or update PR comment with static library build
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    needs:
-      - build_static_library
-    steps:
-      - uses: peter-evans/find-comment@v3
-        id: find_comment
-        with:
-          issue-number: ${{ github.event.pull_request.number }}
-          comment-author: 'github-actions[bot]'
-          body-includes: Static library release preview
-      - uses: peter-evans/create-or-update-comment@v4
-        with:
-          comment-id: ${{ steps.find_comment.outputs.comment-id }}
-          issue-number: ${{ github.event.pull_request.number }}
-          edit-mode: replace
-          body: |-
-            ## Static library release preview
 
-            [dearxan-static-${{ github.event.pull_request.head.sha }}](${{ needs.build_static_library.outputs.artifact-url }})
-
-            Note that this build artifact is only retained for 90 days.
 
   all_checks_pass:
       needs:
@@ -107,7 +65,6 @@ jobs:
         - clippy
         - test_stable
         - test_nightly
-        - build_static_library
 
       runs-on: ubuntu-latest
       steps:
