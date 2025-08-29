@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v0.3.0] - 2025-08-19
+## [v0.4.0] - 2025-08-29
+
+### Breaking Changes
+- `dearxan::analysis::is_arxan_hooked_entry_point` has been removed, and replaced with `dearxan::analysis::entry_point::MsvcEntryPoint::try_from_va`.
+
+### Changed
+- While not recommended, `neuter_arxan` and `schedule_after_arxan` APIs now support being called after the game's entry point has run.
+- The static library releases now contain the Windows import libraries that `dearxan.lib` depends on to make linking easier.
+
+## [v0.3.1] - 2025-08-19
 
 ### Fixed
 - `ArxanPatch::build_from_stubs` emitting patches in an incorrect order by @Dasaav-dsv
