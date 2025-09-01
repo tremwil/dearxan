@@ -315,7 +315,7 @@ pub unsafe fn neuter_steamstub(callback: impl FnOnce(SteamstubStatus) + Send + '
         panic!("schedule_after_steamstub must not be called more than once");
     }
 
-    let blocking = process_main_thread().is_none_or(is_created_suspended);
+    let blocking = process_main_thread().is_none_or(|t| is_created_suspended(t.raw()));
 
     let game = game();
     let base = game.pe.optional_header().ImageBase;

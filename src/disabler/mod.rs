@@ -328,7 +328,7 @@ where
     ctx.callbacks.push(bare_callback.leak());
     CALLBACK_PUSHED.call_once(|| {});
 
-    if !process_main_thread().is_none_or(is_created_suspended) {
+    if !process_main_thread().is_none_or(|t| is_created_suspended(t.raw())) {
         if DEARXAN_SCHEDULED_AFTER_ARXAN.1 < size_of::<Ctx>() {
             log::error!(
                 "module that initialized the schedule_after_arxan state does not support post-entry-point calls"
