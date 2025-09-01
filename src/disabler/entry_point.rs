@@ -170,7 +170,7 @@ pub fn iter_threads(access: Option<THREAD_ACCESS_RIGHTS>) -> impl Iterator<Item 
         let mut raw_thread = thread.as_ref().map(|t| t.raw()).unwrap_or_default();
         let status = ntdll::NtGetNextThread(proc, raw_thread, access, 0, 0, &mut raw_thread);
         thread = OwnedHandle::new(raw_thread);
-        thread.as_ref().filter(|_| status >= 0).map(|t| t.clone())
+        thread.as_ref().filter(|_| status >= 0).cloned()
     })
 }
 
@@ -224,8 +224,8 @@ pub fn process_main_thread() -> Option<OwnedHandle> {
 
 pub fn is_created_suspended(thread: HANDLE) -> bool {
     static RTL_USER_THREAD_START: LazyLock<usize> = LazyLock::new(|| unsafe {
-        let ntdll = GetModuleHandleA(b"ntdll.dll\0".as_ptr());
-        GetProcAddress(ntdll, b"RtlUserThreadStart\0".as_ptr())
+        let ntdll = GetModuleHandleA(c"ntdll.dll".as_ptr().cast());
+        GetProcAddress(ntdll, c"RtlUserThreadStart".as_ptr().cast())
             .expect("RtlUserThreadStart not found") as usize
     });
 
