@@ -1,5 +1,5 @@
 use std::{
-    ptr::null_mut,
+    ptr::{NonNull, null_mut},
     sync::{
         LazyLock,
         atomic::{AtomicU64, Ordering::Relaxed},
@@ -9,9 +9,12 @@ use std::{
 
 use pelite::pe64::Pe;
 use windows_sys::Win32::{
-    Foundation::{HANDLE, NTSTATUS},
+    Foundation::{
+        CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, GetLastError, HANDLE, NTSTATUS,
+    },
     System::{
         Diagnostics::Debug::{CONTEXT, CONTEXT_FULL_AMD64, GetThreadContext},
+        LibraryLoader::{GetModuleHandleA, GetProcAddress},
         Threading::{
             GetCurrentProcess, GetCurrentThreadId, GetThreadId, ResumeThread, SuspendThread,
             THREAD_ACCESS_RIGHTS, THREAD_ALL_ACCESS, THREAD_QUERY_INFORMATION,
@@ -20,31 +23,89 @@ use windows_sys::Win32::{
     },
 };
 
-#[cfg_attr(target_os = "windows", link(name = "ntdll", kind = "raw-dylib"))]
-unsafe extern "C" {
-    fn NtGetNextThread(
-        process_handle: HANDLE,
-        thread_handle: HANDLE,
-        desired_access: THREAD_ACCESS_RIGHTS,
-        handle_attributes: u32,
-        flags: u32,
-        new_thread_handle: *mut HANDLE,
-    ) -> NTSTATUS;
+#[allow(
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    dead_code
+)]
+mod ntdll {
+    use super::*;
 
-    fn NtQueryInformationThread(
-        thread_handle: HANDLE,
-        thread_information_class: u32,
-        thread_information: *mut (),
-        thread_information_length: usize,
-        return_length: *mut usize,
-    ) -> NTSTATUS;
+    #[cfg_attr(target_os = "windows", link(name = "ntdll", kind = "raw-dylib"))]
+    unsafe extern "C" {
+        pub fn NtGetNextThread(
+            process_handle: HANDLE,
+            thread_handle: HANDLE,
+            desired_access: THREAD_ACCESS_RIGHTS,
+            handle_attributes: u32,
+            flags: u32,
+            new_thread_handle: *mut HANDLE,
+        ) -> NTSTATUS;
 
-    fn RtlUserThreadStart(function: Option<extern "C" fn(*mut ()) -> NTSTATUS>, parameter: *mut ());
+        pub fn NtQueryInformationThread(
+            thread_handle: HANDLE,
+            thread_information_class: u32,
+            thread_information: *mut (),
+            thread_information_length: usize,
+            return_length: *mut usize,
+        ) -> NTSTATUS;
+    }
+
+    pub const ThreadSuspendCount: u32 = 35;
+    pub const ThreadQuerySetWin32StartAddress: u32 = 9;
 }
 
 use fxhash::FxHashMap;
 
 use crate::{analysis::ImageView, disabler::game::game};
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct OwnedHandle(NonNull<std::ffi::c_void>);
+
+impl OwnedHandle {
+    pub fn new(handle: HANDLE) -> Option<Self> {
+        NonNull::new(handle).map(Self)
+    }
+
+    pub fn raw(&self) -> HANDLE {
+        self.0.as_ptr()
+    }
+}
+
+impl Clone for OwnedHandle {
+    fn clone(&self) -> Self {
+        let mut handle_out = null_mut();
+        unsafe {
+            let cproc = GetCurrentProcess();
+            let success = DuplicateHandle(
+                cproc,
+                self.raw(),
+                cproc,
+                &mut handle_out,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            );
+            if success == 0 {
+                panic!("DuplicateHandle failed: {}", GetLastError());
+            }
+        }
+        handle_out.into()
+    }
+}
+
+impl Drop for OwnedHandle {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.raw()) };
+    }
+}
+
+impl From<HANDLE> for OwnedHandle {
+    fn from(value: HANDLE) -> Self {
+        Self(NonNull::new(value).unwrap())
+    }
+}
 
 /// Find the virtual address of the global security cookie.
 ///
@@ -100,22 +161,21 @@ pub unsafe fn wait_for_gs_cookie(timeout: Option<Duration>) -> Result<(), &'stat
 /// rights.
 ///
 /// If `access` is `None`, the default rights of [`THREAD_ALL_ACCESS`] are used.
-pub fn iter_threads(access: Option<THREAD_ACCESS_RIGHTS>) -> impl Iterator<Item = HANDLE> {
+pub fn iter_threads(access: Option<THREAD_ACCESS_RIGHTS>) -> impl Iterator<Item = OwnedHandle> {
     let access = access.unwrap_or(THREAD_ALL_ACCESS);
     let proc = unsafe { GetCurrentProcess() };
-    let mut thread: HANDLE = null_mut();
+    let mut thread: Option<OwnedHandle> = None;
 
     std::iter::from_fn(move || unsafe {
-        let status = NtGetNextThread(proc, thread, access, 0, 0, &mut thread);
-        if status < 0 || thread.is_null() {
-            return None;
-        }
-        Some(thread)
+        let mut raw_thread = thread.as_ref().map(|t| t.raw()).unwrap_or_default();
+        let status = ntdll::NtGetNextThread(proc, raw_thread, access, 0, 0, &mut raw_thread);
+        thread = OwnedHandle::new(raw_thread);
+        thread.as_ref().filter(|_| status >= 0).map(|t| t.clone())
     })
 }
 
 pub struct SuspendGuard {
-    suspended: Vec<HANDLE>,
+    suspended: Vec<OwnedHandle>,
 }
 
 impl SuspendGuard {
@@ -126,7 +186,9 @@ impl SuspendGuard {
             let current_thread = GetCurrentThreadId();
 
             let suspended = iter_threads(Some(THREAD_SUSPEND_RESUME | THREAD_QUERY_INFORMATION))
-                .filter(|&h| GetThreadId(h) != current_thread && SuspendThread(h) != u32::MAX)
+                .filter(|h| {
+                    GetThreadId(h.raw()) != current_thread && SuspendThread(h.raw()) != u32::MAX
+                })
                 .collect();
 
             Self { suspended }
@@ -138,23 +200,21 @@ impl Drop for SuspendGuard {
     fn drop(&mut self) {
         log::debug!("resuming threads");
         for thread in std::mem::take(&mut self.suspended) {
-            unsafe { ResumeThread(thread) };
+            unsafe { ResumeThread(thread.raw()) };
         }
     }
 }
 
-pub fn process_main_thread() -> Option<HANDLE> {
-    const THREAD_QUERY_SET_WIN32_START_ADDRESS: u32 = 9;
-
+pub fn process_main_thread() -> Option<OwnedHandle> {
     let pe = game().pe;
     let pe_ep = pe.optional_header().ImageBase + pe.optional_header().AddressOfEntryPoint as u64;
 
-    iter_threads(None).find(|&thread| unsafe {
+    iter_threads(None).find(|thread| unsafe {
         let mut thread_ep = 0;
-        let status = NtQueryInformationThread(
-            thread,
-            THREAD_QUERY_SET_WIN32_START_ADDRESS,
-            (&mut thread_ep as *mut u64).cast(),
+        let status = ntdll::NtQueryInformationThread(
+            thread.raw(),
+            ntdll::ThreadQuerySetWin32StartAddress,
+            (&raw mut thread_ep).cast(),
             size_of_val(&thread_ep),
             null_mut(),
         );
@@ -163,14 +223,49 @@ pub fn process_main_thread() -> Option<HANDLE> {
 }
 
 pub fn is_created_suspended(thread: HANDLE) -> bool {
+    static RTL_USER_THREAD_START: LazyLock<usize> = LazyLock::new(|| unsafe {
+        let ntdll = GetModuleHandleA(b"ntdll.dll\0".as_ptr());
+        GetProcAddress(ntdll, b"RtlUserThreadStart\0".as_ptr())
+            .expect("RtlUserThreadStart not found") as usize
+    });
+
+    // Check if the thread is suspended
+    let mut suspend_count: std::ffi::c_ulong = 0;
+    let info_status = unsafe {
+        ntdll::NtQueryInformationThread(
+            thread,
+            ntdll::ThreadSuspendCount,
+            (&raw mut suspend_count).cast(),
+            size_of_val(&suspend_count),
+            null_mut(),
+        )
+    };
+    if info_status < 0 {
+        log::error!(
+            "NtQueryInformationThread failed: {:x}",
+            info_status.cast_unsigned()
+        );
+        return false;
+    }
+    if suspend_count == 0 {
+        return false;
+    }
+
+    // Check the context to verify that it hasn't started executing its entry point yet
     let mut context = CONTEXT {
         ContextFlags: CONTEXT_FULL_AMD64,
         ..Default::default()
     };
-
     if unsafe { GetThreadContext(thread, &mut context) } == 0 {
+        log::error!("GetThreadContext failed");
         return false;
     }
 
-    context.Rip == RtlUserThreadStart as usize as u64
+    let pe = game().pe;
+    let pe_ep = pe.optional_header().ImageBase + pe.optional_header().AddressOfEntryPoint as u64;
+
+    // We check if either are true instead of both to account for thread hijacking techniques
+    // In particular, the Steam game overlay initializes itself using RIP thread hijacking
+    // But another thread hijacking technique for suspended threads is overwriting RCX
+    context.Rip == *RTL_USER_THREAD_START as u64 || context.Rcx == pe_ep
 }
