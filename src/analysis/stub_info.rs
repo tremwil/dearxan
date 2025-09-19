@@ -6,9 +6,12 @@ use indexmap::IndexMap;
 
 use super::{
     cfg::{ArxanCfgVisitor, CallInfo},
-    encryption::{EncryptedRegion, EncryptedRegionList},
+    encryption::{
+        DecryptReader, EncryptedRegion, EncryptedRegionList, rmx_decryptor, tea_decryptor,
+    },
     vm::{ImageView, MemoryStore, ProgramState, Registers, RunStep, StepKind},
 };
+use crate::analysis::encryption::{ArxanDecryptionKind, sub_decryptor};
 
 /// Information about an Arxan return gadget.
 ///
@@ -73,15 +76,202 @@ struct RegionsKeyCandidate<'a> {
 }
 
 #[derive(Debug, Clone)]
-enum EncryptionState<'a> {
+enum TeaEncryptionState<'a> {
     SearchingRegions((Vec<RegionsKeyCandidate<'a>>, Vec<u64>)),
     SearchingCiphertext(RegionListInfo),
     Found(EncryptedRegionList),
 }
 
-impl Default for EncryptionState<'_> {
+impl Default for TeaEncryptionState<'_> {
     fn default() -> Self {
         Self::SearchingRegions((Vec::default(), Vec::default()))
+    }
+}
+
+#[derive(Debug, Clone)]
+enum RmxEncryptionState<'a> {
+    Searching {
+        key: Option<u32>,
+        regions: Option<Vec<EncryptedRegion>>,
+        ciphertext: Option<&'a [u8]>,
+    },
+    Found(EncryptedRegionList),
+}
+
+impl<'a> RmxEncryptionState<'a> {
+    fn update<I: ImageView, D: Clone>(&mut self, step: &RunStep<&'a I, D>) {
+        let image = *step.state.memory.image();
+
+        let Self::Searching {
+            key,
+            regions,
+            ciphertext,
+        } = self
+        else {
+            return;
+        };
+
+        if key.is_none()
+            && matches!(
+                step.instruction.code(),
+                Code::And_EAX_imm32 | Code::And_rm32_imm8
+            )
+            && step.instruction.immediate32() == 0x1f
+            && let Some(k) = step.state.registers.read_gpr(step.instruction.op0_register())
+        {
+            log::trace!("found potential rmx key: {:x}", k);
+            *key = Some(k as u32);
+        }
+        if regions.is_none()
+            && step.instruction.code() == Code::Movzx_r32_rm8
+            && step.instruction.op1_kind() == OpKind::Memory
+            && let Some(va) = step.state.virtual_address(step.instruction, 1)
+            && let Some(varints) = image.read(va, 2)
+        {
+            // enforce max length of 256 to avoid false positives
+            // let varints = varints.get(..0x100).unwrap_or(varints);
+            if let Ok(rlist) = EncryptedRegion::try_from_varints(varints) {
+                log::trace!("found rmx region list info: {:x?}", rlist);
+                *regions = Some(rlist);
+            }
+        }
+        if ciphertext.is_none()
+            && step.instruction.code() == Code::Imul_r32_rm32
+            && step.instruction.op0_register() == Register::EDX
+            && let Some(rax) = step.state.registers.rax()
+        {
+            log::trace!("found potential rmx ciphertext va: {:x}", rax);
+            *ciphertext = image.read(rax, 4)
+        }
+
+        if let Some(key) = *key
+            && let Some(ctext) = *ciphertext
+            && let Some(regions) = regions.take()
+        {
+            match EncryptedRegionList::try_new(
+                ArxanDecryptionKind::Rmx,
+                regions,
+                DecryptReader::new(ctext, rmx_decryptor(key)),
+            ) {
+                Ok(rlist) => *self = Self::Found(rlist),
+                Err(e) => log::warn!("error while decrypting rmx regions: {e}"),
+            }
+        }
+    }
+}
+
+impl Default for RmxEncryptionState<'_> {
+    fn default() -> Self {
+        Self::Searching {
+            key: None,
+            regions: None,
+            ciphertext: None,
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+enum SubEncryptionState<'a> {
+    #[default]
+    SearchingRegions,
+    SearchingCtextMov {
+        regions: Vec<EncryptedRegion>,
+    },
+    CheckingNeg {
+        regions: Vec<EncryptedRegion>,
+        register: Register,
+        ctext: &'a [u8],
+    },
+    CheckingKey {
+        regions: Vec<EncryptedRegion>,
+        register: Register,
+        ctext: &'a [u8],
+    },
+    Found(EncryptedRegionList),
+}
+
+impl<'a> SubEncryptionState<'a> {
+    fn update<I: ImageView, D: Clone>(&mut self, step: &RunStep<&'a I, D>) {
+        // ignore unconditional non-computed branches
+        if step.instruction.is_jmp_short_or_near() {
+            return;
+        }
+
+        let image = *step.state.memory.image();
+        match self {
+            Self::SearchingRegions => {
+                if step.instruction.code() == Code::Movzx_r32_rm8
+                    && step.instruction.op1_kind() == OpKind::Memory
+                    && let Some(va) = step.state.virtual_address(step.instruction, 1)
+                    && let Some(varints) = image.read(va, 2)
+                    && let Ok(regions) = EncryptedRegion::try_from_varints(varints)
+                {
+                    log::trace!("found sub region list info: {:x?}", regions);
+                    *self = Self::SearchingCtextMov { regions };
+                }
+            }
+            Self::SearchingCtextMov { regions } => {
+                if step.instruction.code() == Code::Mov_r32_rm32
+                    && step.instruction.op1_kind() == OpKind::Memory
+                    && let Some(va) = step.state.virtual_address(step.instruction, 1)
+                    && let Some(ctext) = image.read(va, 1)
+                {
+                    log::trace!("found potential sub ciphertext va: {:x}", va);
+                    *self = Self::CheckingNeg {
+                        regions: std::mem::take(regions),
+                        register: step.instruction.op0_register(),
+                        ctext,
+                    };
+                }
+            }
+            Self::CheckingNeg {
+                regions,
+                register,
+                ctext,
+            } => {
+                if step.instruction.code() == Code::Neg_rm32
+                    && step.instruction.op0_register() == *register
+                {
+                    *self = Self::CheckingKey {
+                        regions: std::mem::take(regions),
+                        register: *register,
+                        ctext,
+                    };
+                }
+                else {
+                    *self = Self::SearchingCtextMov {
+                        regions: std::mem::take(regions),
+                    };
+                }
+            }
+            Self::CheckingKey {
+                regions,
+                register,
+                ctext,
+            } => {
+                if step.instruction.code() == Code::Add_r32_rm32
+                    && step.instruction.op0_register() == *register
+                    && step.instruction.is_ip_rel_memory_operand()
+                    && let Some(key) = step.state.get_operand_value(step.instruction, 1)
+                {
+                    match EncryptedRegionList::try_new(
+                        ArxanDecryptionKind::Sub,
+                        regions.clone(),
+                        DecryptReader::new(ctext, sub_decryptor(key as u32)),
+                    ) {
+                        Ok(rlist) => {
+                            *self = Self::Found(rlist);
+                            return;
+                        }
+                        Err(e) => log::warn!("error while decrypting sub regions: {e}"),
+                    }
+                }
+                *self = Self::SearchingCtextMov {
+                    regions: std::mem::take(regions),
+                };
+            }
+            Self::Found(_) => (),
+        }
     }
 }
 
@@ -90,11 +280,13 @@ struct StubScanState<'a> {
     init_rsp: u64,
     return_gadget: Option<ReturnGadget>,
     context_pop_va: Option<u64>,
-    encryption: EncryptionState<'a>,
-    /// Maps the first 8 bytes of memory at an LEA [rip+...] instruction to its address
-    static_lea_lookup: IndexMap<u64, u64, FxBuildHasher>,
+    tea_state: TeaEncryptionState<'a>,
+    rmx_state: RmxEncryptionState<'a>,
+    sub_state: SubEncryptionState<'a>,
     /// Candidate calls to the stub's tea block decrypt function
     tea_candidates: Vec<BlockTeaCandidate<'a>>,
+    /// Maps the first 8 bytes of memory at an LEA [rip+...] instruction to its address
+    static_lea_lookup: IndexMap<u64, u64, FxBuildHasher>,
 }
 
 impl<'a> StubScanState<'a> {
@@ -119,8 +311,8 @@ impl<'a> StubScanState<'a> {
     }
 
     fn search_region_candidates(&mut self, image: &impl ImageView, new_block_decrypt: Option<u64>) {
-        let EncryptionState::SearchingRegions((key_candidates, block_decrypts)) =
-            &mut self.encryption
+        let TeaEncryptionState::SearchingRegions((key_candidates, block_decrypts)) =
+            &mut self.tea_state
         else {
             return;
         };
@@ -138,13 +330,14 @@ impl<'a> StubScanState<'a> {
 
             let candidate_ctexts = lea_targets.values().filter_map(|&va| image.read(va, 8));
             for ctext in candidate_ctexts {
-                if let Some(region_list) = EncryptedRegion::try_decrypt_list(ctext, key_info.key) {
-                    self.encryption = EncryptionState::SearchingCiphertext(RegionListInfo {
+                let stream = DecryptReader::new(ctext, tea_decryptor(key_info.key));
+                if let Ok(region_list) = EncryptedRegion::try_from_varints(stream) {
+                    self.tea_state = TeaEncryptionState::SearchingCiphertext(RegionListInfo {
                         tea_block_decrypt: key_info.tea_block_decrypt,
                         region_list_key_va: key_info.key_va,
                         encrypted_regions: region_list,
                     });
-                    log::trace!("found region list info: {:x?}", self.encryption);
+                    log::trace!("found tea region list info: {:x?}", self.tea_state);
 
                     self.search_ciphertext_candidates();
                     return;
@@ -155,7 +348,7 @@ impl<'a> StubScanState<'a> {
     }
 
     fn search_ciphertext_candidates(&mut self) {
-        let EncryptionState::SearchingCiphertext(region_list) = &self.encryption
+        let TeaEncryptionState::SearchingCiphertext(region_list) = &self.tea_state
         else {
             return;
         };
@@ -167,9 +360,9 @@ impl<'a> StubScanState<'a> {
 
         if let Some(ctext_decrypt) = self.tea_candidates.first() {
             let encrypted_regions = EncryptedRegionList::try_new(
+                ArxanDecryptionKind::Tea,
                 region_list.encrypted_regions.clone(),
-                ctext_decrypt.ciphertext,
-                ctext_decrypt.key,
+                DecryptReader::new(ctext_decrypt.ciphertext, tea_decryptor(ctext_decrypt.key)),
             )
             .unwrap();
 
@@ -178,7 +371,7 @@ impl<'a> StubScanState<'a> {
                 encrypted_regions.regions
             );
 
-            self.encryption = EncryptionState::Found(encrypted_regions);
+            self.tea_state = TeaEncryptionState::Found(encrypted_regions);
         }
     }
 
@@ -196,7 +389,7 @@ impl<'a> StubScanState<'a> {
 
         log::trace!("possible tea key = {key:02x?} ({key_va:x})");
 
-        if let EncryptionState::SearchingRegions((candidates, _)) = &mut self.encryption {
+        if let TeaEncryptionState::SearchingRegions((candidates, _)) = &mut self.tea_state {
             candidates.push(RegionsKeyCandidate {
                 tea_block_decrypt,
                 next_lea_test: 0,
@@ -236,6 +429,12 @@ impl<'a> StubScanState<'a> {
             }
         }
 
+        // update rmx state
+        self.rmx_state.update(step);
+
+        // update sub state
+        self.sub_state.update(step);
+
         // Track pointee values for LEA reg, [rip+...] instructions
         if step.instruction.code() == Code::Lea_r64_m
             && step.instruction.memory_base() == Register::RIP
@@ -255,21 +454,24 @@ impl<'a> StubScanState<'a> {
         };
 
         // The first return we find will point to the context pop part of the stub
-        if let Some(ret) = call.return_ip {
-            self.context_pop_va.get_or_insert(ret);
+        if let Some(ret) = call.return_ip
+            && self.context_pop_va.is_none()
+        {
+            self.context_pop_va = Some(ret);
         }
-
         // If we know the call target, analyze arguments to try to find the tea block decrypt
         // routine once found, we can use it to find the rest of the tea encryption info
-        if let Some(tgt) = call.target_ip {
+        else if let Some(tgt) = call.target_ip {
             self.on_tea_info(tgt, step);
         }
     }
 
     fn can_stop(&self) -> bool {
-        self.context_pop_va.is_some()
-            && self.return_gadget.is_some()
-            && matches!(self.encryption, EncryptionState::Found(_))
+        let has_encrypted_regions = matches!(self.tea_state, TeaEncryptionState::Found(_))
+            || matches!(self.rmx_state, RmxEncryptionState::Found(_))
+            || matches!(self.sub_state, SubEncryptionState::Found(_));
+
+        self.context_pop_va.is_some() && self.return_gadget.is_some() && has_encrypted_regions
     }
 }
 
@@ -423,16 +625,27 @@ impl StubAnalyzer {
             test_rsp_va,
             context_pop_va,
             return_gadget: scan_state.return_gadget,
-            encrypted_regions: match scan_state.encryption {
-                EncryptionState::SearchingRegions(_) => None,
-                EncryptionState::SearchingCiphertext(list_info) => {
-                    log::debug!(
-                        "stub {test_rsp_va:x}: likely integrity check routine ({} regions)",
-                        list_info.encrypted_regions.len()
-                    );
-                    None
-                }
-                EncryptionState::Found(region_list) => Some(region_list),
+            encrypted_regions: {
+                let tea_regions = match scan_state.tea_state {
+                    TeaEncryptionState::SearchingRegions(_) => None,
+                    TeaEncryptionState::SearchingCiphertext(list_info) => {
+                        log::trace!(
+                            "stub {test_rsp_va:x}: likely integrity check routine ({} regions)",
+                            list_info.encrypted_regions.len()
+                        );
+                        None
+                    }
+                    TeaEncryptionState::Found(region_list) => Some(region_list),
+                };
+                let rmx_regions = match scan_state.rmx_state {
+                    RmxEncryptionState::Found(rlist) => Some(rlist),
+                    _ => None,
+                };
+                let sub_regions = match scan_state.sub_state {
+                    SubEncryptionState::Found(rlist) => Some(rlist),
+                    _ => None,
+                };
+                tea_regions.or(rmx_regions).or(sub_regions)
             },
         })
     }

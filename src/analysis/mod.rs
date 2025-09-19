@@ -1,5 +1,5 @@
 mod cfg;
-mod encryption;
+pub mod encryption;
 pub mod entry_point;
 mod stub_info;
 mod vm;
@@ -20,6 +20,10 @@ pub mod internal {
         #[doc(inline)]
         pub use super::super::cfg::*;
     }
+    #[deprecated(
+        since = "0.4.2",
+        reason = "dearxan::analysis::encryption has been stabilized"
+    )]
     pub mod encryption {
         #[doc(inline)]
         pub use super::super::encryption::*;
@@ -35,9 +39,9 @@ pub mod internal {
 }
 
 pub use self::{
-    encryption::{EncryptedRegion, EncryptedRegionList, shannon_entropy},
+    encryption::{EncryptedRegion, EncryptedRegionList},
     stub_info::{ReturnGadget, StubAnalysisError, StubAnalyzer, StubInfo},
-    vm::{ImageView, image::WithBase},
+    vm::image::{BadRelocsError, ImageView, WithBase},
 };
 
 fn find_test_rsp_instructions<I: ImageView>(image: &I) -> Vec<u64> {
@@ -94,7 +98,7 @@ pub fn analyze_all_stubs_with<
     .collect()
 }
 
-/// Analyze all Arxan stubs found in the executable image using a default [`StubAnalyzer`]
+/// Analyze all Arxan stubs found in the executable image using a default [`StubAnalyzer`].
 ///
 /// If you need to configure the analyzer, consider using [`analyze_all_stubs_with`] instead.
 pub fn analyze_all_stubs<
