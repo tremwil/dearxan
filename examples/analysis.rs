@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use dearxan::analysis::{StubAnalyzer, analyze_all_stubs_with};
+use dearxan::analysis::{StubAnalyzer, analyze_all_stubs_with, encryption};
 use dearxan_test_utils::{FsExe, fsbins, init_log};
 
 #[derive(Parser)]
@@ -95,15 +95,37 @@ fn main() {
         println!("return_gadget : {:x?}", stub_info.return_gadget);
 
         if let Some(region_list) = &stub_info.encrypted_regions {
-            println!("writes {} contiguous encrypted regions:", region_list.len());
+            println!(
+                "writes {} contiguous {:?} encrypted regions",
+                region_list.len(),
+                region_list.kind
+            );
+        }
+    }
 
-            for region in &region_list.regions {
-                println!("- rva = {:x} size = {}", region.rva, region.size);
-                match region.decrypted_slice(region_list) {
-                    Some(r) => println!("{}", pretty_hex::pretty_hex(&r)),
-                    None => log::warn!("this slice is out of bounds of the plaintext block!"),
-                }
-            }
+    let final_patches = encryption::apply_relocs_and_resolve_conflicts(
+        stub_infos
+            .iter()
+            .filter_map(|si| si.as_ref().ok())
+            .filter_map(|si| si.encrypted_regions.as_ref()),
+        pe,
+        None,
+    )
+    .unwrap();
+
+    for rlist in final_patches {
+        println!(
+            "\n{} contiguous {:?} encrypted regions",
+            rlist.len(),
+            rlist.kind
+        );
+
+        for r in &rlist.regions {
+            println!(
+                "rva = {:x} {}",
+                r.rva,
+                pretty_hex::pretty_hex(&r.decrypted_slice(&rlist).unwrap())
+            );
         }
     }
 }
