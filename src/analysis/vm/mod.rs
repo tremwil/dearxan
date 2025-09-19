@@ -223,7 +223,7 @@ impl<I: ImageView, D: Clone> ProgramState<I, D> {
             let mut decoder = Decoder::with_ip(64, instr_bytes, ip, DecoderOptions::NONE);
             decoder.decode_out(&mut instruction);
             if instruction.is_invalid() {
-                log::debug!("invalid instruction at {ip:x}");
+                log::trace!("invalid instruction at {ip:x}");
                 execution_path.truncate(*fork_index);
                 fork_stack.pop();
                 continue;
