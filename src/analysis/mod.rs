@@ -21,8 +21,8 @@ pub mod internal {
         pub use super::super::cfg::*;
     }
     #[deprecated(
-        since = "0.4.2",
-        reason = "dearxan::analysis::encryption has been stabilized"
+        since = "0.5.0",
+        note = "dearxan::analysis::encryption has been stabilized"
     )]
     pub mod encryption {
         #[doc(inline)]
