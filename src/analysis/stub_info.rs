@@ -128,8 +128,6 @@ impl<'a> RmxEncryptionState<'a> {
             && let Some(va) = step.state.virtual_address(step.instruction, 1)
             && let Some(varints) = image.read(va, 2)
         {
-            // enforce max length of 256 to avoid false positives
-            // let varints = varints.get(..0x100).unwrap_or(varints);
             if let Ok(rlist) = EncryptedRegion::try_from_varints(varints) {
                 log::trace!("found rmx region list info: {:x?}", rlist);
                 *regions = Some(rlist);
