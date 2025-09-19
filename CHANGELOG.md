@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.5.0] - 2025-09-19
+
+### Breaking Changes
+- Added `kind` field to `dearxan::analysis::encryption::EncryptedRegionList`
+- Methods of `dearxan::analysis::encryption::EncryptedRegion`
+- `Sync` bound now present on `image` parameter of `dearxan::patch::ArxanPatch::build_from_stubs` if the `rayon` feature is enabled
+
+### Added
+- Region extraction analyses for Arxan's rotate-mulitply-xor and constant subtraction pseudo-encryption algorithms
+
+### Changed
+- Greatly improved robustness of encrypted region conflict resolution and elimination
+
+### Fixed
+- Sound partially broken in DS3 due to missing Arxan encrypted region for sound binder encryption keys
+
+### Stabilized
+- `dearxan::analysis::encryption` APIs, deprecating its usage through the `internal_api` feature
+
 ## [v0.4.1] - 2025-09-01
 
 ### Fixed
