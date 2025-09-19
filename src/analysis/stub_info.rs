@@ -127,11 +127,10 @@ impl<'a> RmxEncryptionState<'a> {
             && step.instruction.op1_kind() == OpKind::Memory
             && let Some(va) = step.state.virtual_address(step.instruction, 1)
             && let Some(varints) = image.read(va, 2)
+            && let Ok(rlist) = EncryptedRegion::try_from_varints(varints)
         {
-            if let Ok(rlist) = EncryptedRegion::try_from_varints(varints) {
-                log::trace!("found rmx region list info: {:x?}", rlist);
-                *regions = Some(rlist);
-            }
+            log::trace!("found rmx region list info: {:x?}", rlist);
+            *regions = Some(rlist);
         }
         if ciphertext.is_none()
             && step.instruction.code() == Code::Imul_r32_rm32
