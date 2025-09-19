@@ -1,9 +1,8 @@
 //! Structs detailing code patches to indivitual Arxan stubs.
 
-use fxhash::FxHashMap;
 use iced_x86::IcedError;
 
-use crate::analysis::{EncryptedRegionList, ImageView, StubInfo, shannon_entropy};
+use crate::analysis::{BadRelocsError, ImageView, StubInfo, encryption};
 
 /// An individual patch to the executable image.
 #[derive(Debug, Clone)]
@@ -37,6 +36,12 @@ impl From<IcedError> for PatchGenError {
     }
 }
 
+impl From<BadRelocsError> for PatchGenError {
+    fn from(_value: BadRelocsError) -> Self {
+        Self::RelocsCorrupted
+    }
+}
+
 impl std::fmt::Display for PatchGenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -66,105 +71,53 @@ impl ArxanPatch {
     /// If `image` was mapped at a different address to its preferred base address,
     /// relocations may need to be applied to some of the patches. In that case `preferred_base`
     /// must be provided.
-    pub fn build_from_stubs<'a, I: ImageView>(
+    pub fn build_from_stubs<
+        'a,
+        #[cfg(feature = "rayon")] I: ImageView + Sync,
+        #[cfg(not(feature = "rayon"))] I: ImageView,
+    >(
         image: I,
         preferred_base: Option<u64>,
         analyzed_stubs: impl IntoIterator<Item = &'a StubInfo>,
     ) -> Result<Vec<Self>, PatchGenError> {
         let analyzed_stubs = analyzed_stubs.into_iter();
 
-        let mut decrypt_conflicts: FxHashMap<u32, Vec<&EncryptedRegionList>> = FxHashMap::default();
         let mut hooks = Vec::with_capacity(analyzed_stubs.size_hint().0);
-
-        for stub in analyzed_stubs {
-            if let Some(rlist) = &stub.encrypted_regions
-                && let Some(r) = rlist.regions.first()
-            {
-                decrypt_conflicts.entry(r.rva).or_default().push(rlist)
-            }
-            hooks.push(ArxanPatch::JmpHook {
-                target: stub.test_rsp_va,
-                pic: assemble_stub_patch(stub)?,
-            })
-        }
-
-        let actual_base = image.base_va();
-        let mut writes = Vec::with_capacity(decrypt_conflicts.len());
-
-        for conflicts in decrypt_conflicts.values() {
-            // Get the region list that doesn't match existing bytes with the lowest Shannon entropy
-            let Some((rlist, _)) = conflicts
-                .iter()
-                .filter_map(|rlist| {
-                    let first = rlist.regions.first()?;
-                    (image.read(actual_base + first.rva as u64, first.size)
-                        != first.decrypted_slice(rlist))
-                    .then(|| (*rlist, shannon_entropy(&rlist.decrypted_stream)))
-                })
-                .min_by(|a, b| f64::total_cmp(&a.1, &b.1))
-            else {
-                continue;
-            };
-            // Make sure that all regions in the list are within the image
-            if let Some(r) = rlist
-                .regions
-                .iter()
-                .find(|r| image.read(actual_base + r.rva as u64, r.size).is_none())
-            {
-                return Err(PatchGenError::OutOfBounds {
-                    rva: r.rva as usize,
-                    size: r.size,
+        let mut error = None;
+        let final_rlists = encryption::apply_relocs_and_resolve_conflicts(
+            analyzed_stubs.filter_map(|si| {
+                hooks.push(ArxanPatch::JmpHook {
+                    target: si.test_rsp_va,
+                    pic: match assemble_stub_patch(si) {
+                        Ok(pic) => pic,
+                        Err(e) => {
+                            error = Some(e);
+                            return None;
+                        }
+                    },
                 });
-            }
-            // Collect all contiguous writes together
-            writes.extend(
-                rlist
-                    .regions
-                    .iter()
-                    .map(|r| (r.rva, r.decrypted_slice(rlist).unwrap().to_owned())),
-            );
+                si.encrypted_regions.as_ref()
+            }),
+            &image,
+            preferred_base,
+        )?;
+        if let Some(e) = error {
+            return Err(e.into());
         }
 
-        // Handle relocs to decrypted regions, if necessary
-        if let Some(preferred) = preferred_base
-            && preferred != actual_base
-        {
-            // Use a mergesort like pass to match regions with their relocs
-            writes.sort_by_key(|(rva, _)| *rva);
+        let base_va = image.base_va();
 
-            // Usually, PE relocs are in the right order, but we don't guarantee this
-            let mut relocs: Vec<_> =
-                image.relocs64().map_err(|_| PatchGenError::RelocsCorrupted)?.collect();
-            relocs.sort();
-
-            let reloc_offset = actual_base.wrapping_sub(preferred);
-            let mut i_reloc = relocs.into_iter().peekable();
-            for (rva, bytes) in &mut writes {
-                while let Some(reloc) = i_reloc.next_if(|r| r + 8 <= *rva + bytes.len() as u32) {
-                    let Some(offset) = reloc.checked_sub(*rva).map(|r| r as usize)
-                    else {
-                        continue;
-                    };
-                    let target_bytes = &mut bytes[offset..offset + 8];
-                    let target: u64 = bytemuck::pod_read_unaligned(target_bytes);
-                    let adjusted = target.wrapping_add(reloc_offset);
-                    target_bytes.copy_from_slice(bytemuck::bytes_of(&adjusted));
-                    log::trace!("applied reloc at {:x} (in patch at rva {:x})", reloc, rva)
-                }
-            }
-        }
-
-        let patches = writes
+        let patches = final_rlists
             .into_iter()
-            .map(|(rva, bytes)| ArxanPatch::Write {
-                va: actual_base + rva as u64,
-                bytes,
+            .flat_map(|rlist| {
+                rlist.regions.into_iter().map(move |r| ArxanPatch::Write {
+                    va: base_va + r.rva as u64,
+                    bytes: rlist.decrypted_stream[r.stream_offset..r.stream_offset + r.size]
+                        .to_owned(),
+                })
             })
             .chain(hooks)
             .collect();
-
-        // Create a write patch for every reloc in the exe
-        // TODO: Use a mergesort like algorithm to intersect decrypted regions and relocs
 
         Ok(patches)
     }

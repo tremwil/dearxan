@@ -320,4 +320,160 @@ pub fn shannon_entropy(bytes: impl IntoIterator<Item = u8>) -> f64 {
 
     plogp_sum / (len as f64)
 }
+
+/// Apply relocs and resolve conflicts between many [`EncryptedRegionList`].
+///
+/// Conflict resolution is based on Shannon entropy. The region lists with lowest entropy
+/// are assumed to represent decrypted bytes, while any conflicting region is assumed to be
+/// "encrypted".
+pub fn apply_relocs_and_resolve_conflicts<
+    'a,
+    #[cfg(feature = "rayon")] I: ImageView + Sync,
+    #[cfg(not(feature = "rayon"))] I: ImageView,
+>(
+    region_lists: impl IntoIterator<Item = &'a EncryptedRegionList>,
+    image: I,
+    preferred_base: Option<u64>,
+) -> Result<Vec<EncryptedRegionList>, BadRelocsError> {
+    #[cfg(feature = "rayon")]
+    use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+
+    let base_va = image.base_va();
+
+    struct ProcessedRegionList {
+        rlist: EncryptedRegionList,
+        entropy: f64,
+        base_entropy: f64,
+        eliminated: bool,
+    }
+
+    struct ContiguousRegion {
+        rlist_index: usize,
+        region: EncryptedRegion,
+    }
+
+    let sorted_relocs = {
+        let mut relocs: Vec<_> = image.relocs64()?.collect();
+        relocs.sort();
+        relocs
+    };
+
+    let region_lists = region_lists.into_iter();
+    let mut processed = Vec::with_capacity(region_lists.size_hint().0);
+    let mut contiguous_regions = Vec::with_capacity(processed.capacity());
+
+    // Compute the image entropy for each non-empty region list
+    for rlist in region_lists.filter(|r| !r.is_empty()) {
+        let index = processed.len();
+        processed.push(ProcessedRegionList {
+            entropy: 0.0,
+            base_entropy: 0.0,
+            rlist: rlist.clone(),
+            eliminated: false,
+        });
+
+        contiguous_regions.extend(rlist.regions.iter().map(|r| ContiguousRegion {
+            rlist_index: index,
+            region: r.clone(),
+        }));
+    }
+
+    // sort contiguous regions by increasing rva and size
+    // will make applying relocs and handling collisions faster
+    contiguous_regions.sort_by_key(|r| (r.region.rva, r.region.size));
+
+    // apply relocs using single pass through the sorted relocs array
+    // also use relocs to eliminate encrypted regions
+    let pref_base = preferred_base.unwrap_or(base_va);
+    let base_diff = base_va.wrapping_sub(pref_base);
+    let mut crel = sorted_relocs.iter().copied().peekable();
+
+    for r in &contiguous_regions {
+        let parent = &mut processed[r.rlist_index];
+        if parent.eliminated {
+            continue;
+        }
+
+        // skip earlier relocs and stop if we exhausted them
+        while crel.next_if(|&reloc| reloc < r.region.rva).is_some() {}
+        if crel.peek().is_none() {
+            break;
+        }
+
+        let region_end = r.region.rva + r.region.size as u32;
+        for reloc in crel.clone().take_while(|&r| r + 8 <= region_end) {
+            let offset = (reloc - r.region.rva) as usize + r.region.stream_offset;
+            let reloc_area: &mut [u8; 8] =
+                (&mut parent.rlist.decrypted_stream[offset..offset + 8]).try_into().unwrap();
+
+            let relocated = u64::from_le_bytes(*reloc_area).wrapping_add(base_diff);
+            if image.read(relocated, 1).is_none() {
+                log::trace!("rlist {} eliminated using relocs", r.rlist_index);
+                parent.eliminated = true;
+                break;
+            }
+
+            *reloc_area = relocated.to_le_bytes();
+        }
+    }
+
+    #[cfg(not(feature = "rayon"))]
+    let not_eliminated = processed.iter_mut().enumerate().filter(|p| !p.eliminated);
+    #[cfg(feature = "rayon")]
+    let not_eliminated = processed.par_iter_mut().filter(|p| !p.eliminated);
+
+    // now that relocs have been applied, compute entropies on non-eliminated rlists
+    // this is worth doing in parallel
+    not_eliminated.for_each(|p| {
+        let base_bytes_iter = p.rlist.regions.iter().flat_map(|r| {
+            image
+                .read(base_va + r.rva as u64, r.size)
+                .map_or(&[] as &[u8], |s| &s[..r.size as usize])
+        });
+        p.base_entropy = shannon_entropy(base_bytes_iter.copied());
+        p.entropy = shannon_entropy(p.rlist.decrypted_stream.iter().copied());
+        p.eliminated = p.entropy >= p.base_entropy;
+
+        if !p.eliminated {
+            log::trace!(
+                "kind = {:?} rva = {:08x} base_entropy = {:.03} entropy = {:.03} len = {}",
+                p.rlist.kind,
+                p.rlist.regions[0].rva,
+                p.base_entropy,
+                p.entropy,
+                p.rlist.decrypted_stream.len()
+            );
+        }
+    });
+
+    // use sorted contiguous regions to find intersections between region lists and eliminate
+    // conflicting ones with high shannon entropy
+    if let Some(i) = contiguous_regions.iter().position(|r| !processed[r.rlist_index].eliminated) {
+        let mut best = &contiguous_regions[i];
+        for r in contiguous_regions.get(i + 1..).unwrap_or(&[]) {
+            let Ok([r_rlist, best_rlist]) =
+                processed.get_disjoint_mut([r.rlist_index, best.rlist_index])
+            else {
+                // if not disjoint then they have the same rlist and don't intersect
+                best = r;
+                continue;
+            };
+            if r_rlist.eliminated {
+                continue;
+            }
+            if !best.region.intersects(&r.region) {
+                best = r;
+                continue;
+            }
+            if best_rlist.entropy > r_rlist.entropy {
+                best_rlist.eliminated = true;
+                best = r;
+            }
+            else {
+                r_rlist.eliminated = true;
+            }
+        }
+    };
+
+    Ok(processed.into_iter().filter_map(|p| (!p.eliminated).then(|| p.rlist)).collect())
 }
