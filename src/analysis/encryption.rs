@@ -181,10 +181,6 @@ pub fn try_read_varint(mut reader: impl io::Read) -> io::Result<u32> {
     }
 }
 
-/// Subtract decryptor.
-///
-/// Another data obfuscation "cipher" used by Arxan.
-
 /// A contiguous region of bytes encrypted by Arxan.
 ///
 /// See the module-level documentation for more information.
@@ -428,7 +424,7 @@ pub fn apply_relocs_and_resolve_conflicts<
         let base_bytes_iter = p.rlist.regions.iter().flat_map(|r| {
             image
                 .read(base_va + r.rva as u64, r.size)
-                .map_or(&[] as &[u8], |s| &s[..r.size as usize])
+                .map_or(&[] as &[u8], |s| &s[..r.size])
         });
         p.base_entropy = shannon_entropy(base_bytes_iter.copied());
         p.entropy = shannon_entropy(p.rlist.decrypted_stream.iter().copied());
@@ -475,5 +471,8 @@ pub fn apply_relocs_and_resolve_conflicts<
         }
     };
 
-    Ok(processed.into_iter().filter_map(|p| (!p.eliminated).then(|| p.rlist)).collect())
+    Ok(processed
+        .into_iter()
+        .filter_map(|p| (!p.eliminated).then_some(p.rlist))
+        .collect())
 }
