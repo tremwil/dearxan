@@ -1,6 +1,8 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 use dearxan::analysis::{StubAnalyzer, analyze_all_stubs_with};
-use dearxan_test_utils::{fsbins, init_log};
+use dearxan_test_utils::{FsExe, fsbins, init_log};
 
 #[derive(Parser)]
 #[command(version, about = "Analyze a single Arxan stub", long_about = None)]
@@ -35,15 +37,27 @@ fn main() {
     init_log(log::LevelFilter::Trace);
 
     let args = CliArgs::parse();
-    let game = fsbins()
-        .iter()
-        .find(|g| g.name.eq_ignore_ascii_case(&args.game))
-        .and_then(|g| {
-            args.ver
-                .map(|tgt| g.versions.iter().find(|exe| exe.ver == tgt))
-                .unwrap_or(g.versions.last())
-        })
-        .expect("game or version not found");
+    let game = if matches!(std::fs::exists(&args.game), Ok(true)) {
+        let path = PathBuf::from(&args.game);
+        log::info!("assuming game is the executable at '{}'", args.game);
+        FsExe {
+            game: path.file_stem().unwrap().to_string_lossy().to_string(),
+            ver: "0".to_string(),
+            path,
+        }
+    }
+    else {
+        fsbins()
+            .iter()
+            .find(|g| g.name.eq_ignore_ascii_case(&args.game))
+            .and_then(|g| {
+                args.ver
+                    .map(|tgt| g.versions.iter().find(|exe| exe.ver == tgt))
+                    .unwrap_or(g.versions.last())
+            })
+            .expect("game or version not found")
+            .clone()
+    };
 
     if !args.trace {
         log::set_max_level(log::LevelFilter::Debug);
@@ -67,7 +81,7 @@ fn main() {
 
     log::info!("found {} Arxan stubs", stub_infos.len());
 
-    for stub_info_result in stub_infos {
+    for stub_info_result in &stub_infos {
         let stub_info = match stub_info_result {
             Ok(si) => si,
             Err(e) => {
