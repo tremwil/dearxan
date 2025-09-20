@@ -414,7 +414,7 @@ pub fn apply_relocs_and_resolve_conflicts<
     }
 
     #[cfg(not(feature = "rayon"))]
-    let not_eliminated = processed.iter_mut().enumerate().filter(|p| !p.eliminated);
+    let not_eliminated = processed.iter_mut().filter(|p| !p.eliminated);
     #[cfg(feature = "rayon")]
     let not_eliminated = processed.par_iter_mut().filter(|p| !p.eliminated);
 
