@@ -12,13 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Ensure changelog has notes for release
         run: python ./.github/scripts/release_notes.py
 
       - name: Publish dry-run
-        run: cargo +nightly -Z package-workspace publish --dry-run -p dearxan -p dearxan-test-utils
+        run: cargo publish --dry-run -p dearxan -p dearxan-test-utils
 
   publish:
     if: github.event_name == 'push'
@@ -29,13 +29,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Make static library dist
         run: python ./.github/scripts/build_dist_archive.py
 
       - name: crates.io publish
-        run: cargo +nightly -Z package-workspace publish -p dearxan -p dearxan-test-utils --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish -p dearxan -p dearxan-test-utils --token ${{ secrets.CRATES_IO_TOKEN }}
 
       - name: Get package version
         id: get_version
