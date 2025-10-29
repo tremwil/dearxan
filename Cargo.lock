@@ -216,16 +216,25 @@ checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
 
 [[package]]
 name = "closure-ffi"
-version = "5.0.0"
+version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1803512f3842ab381e6f9e70f925f3709fd9efd08da75d08c4bc74cdb1845b64"
+checksum = "be4d89c2c4c9473653642fec9e0fa47bbe3bdaf5edd874dfcb2200ac2ccd673d"
 dependencies = [
  "capstone-git",
- "iced-x86",
+ "closure-ffi-iced-x86",
  "jit-allocator2",
  "libc",
  "rustflags",
  "spin 0.10.0",
+]
+
+[[package]]
+name = "closure-ffi-iced-x86"
+version = "1.21.0-commit50066fb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87f5da827759602d2f4c9225d519db7798eef3825973f7afb62739acac1df91d"
+dependencies = [
+ "lazy_static",
 ]
 
 [[package]]
