@@ -24,7 +24,7 @@ use closure_ffi::BareFnOnce;
 use pelite::pe64::{Pe, PeView};
 
 use super::{game::game, util};
-use crate::disabler::entry_point::{is_created_suspended, process_main_thread, wait_for_gs_cookie};
+use crate::disabler::entry_point::{is_pre_entry_point, wait_for_gs_cookie};
 
 #[derive(Default, Debug, Clone, Copy)]
 struct SteamDrmHasher {
@@ -315,8 +315,7 @@ pub unsafe fn neuter_steamstub(callback: impl FnOnce(SteamstubStatus) + Send + '
         panic!("schedule_after_steamstub must not be called more than once");
     }
 
-    let blocking = process_main_thread().is_none_or(|t| is_created_suspended(t.raw()));
-
+    let blocking = is_pre_entry_point();
     let game = game();
     let base = game.pe.optional_header().ImageBase;
     let opt_header = game.pe.optional_header();

@@ -43,17 +43,14 @@ use closure_ffi::BareFnOnce;
 use pelite::pe64::{Pe, PeObject, PeView};
 use windows_sys::Win32::System::Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect};
 
-use crate::disabler::slist::SList;
+use crate::analysis::entry_point::MsvcEntryPoint;
 use crate::disabler::steamstub::neuter_steamstub;
+use crate::disabler::{entry_point::is_pre_entry_point, slist::SList};
 use crate::disabler::{
     entry_point::wait_for_gs_cookie,
     result::{DearxanResult, Status},
 };
 use crate::patch::ArxanPatch;
-use crate::{
-    analysis::entry_point::MsvcEntryPoint,
-    disabler::entry_point::{is_created_suspended, process_main_thread},
-};
 
 mod call_hook;
 mod code_buffer;
@@ -328,7 +325,7 @@ where
     ctx.callbacks.push(bare_callback.leak());
     CALLBACK_PUSHED.call_once(|| {});
 
-    if !process_main_thread().is_none_or(|t| is_created_suspended(t.raw())) {
+    if !is_pre_entry_point() {
         if DEARXAN_SCHEDULED_AFTER_ARXAN.1 < size_of::<Ctx>() {
             log::error!(
                 "module that initialized the schedule_after_arxan state does not support post-entry-point calls"
