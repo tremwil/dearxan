@@ -136,22 +136,24 @@ fn find_gs_cookie_va(image: impl ImageView) -> Option<u64> {
         })
 }
 
-pub unsafe fn wait_for_gs_cookie(timeout: Option<Duration>) -> Result<(), &'static str> {
+/// Checks if the global security cookie of the main executable has been initialized.
+///
+/// If the address of the GS cookie could not be found, returns [`None`].
+fn is_gs_cookie_initialized() -> Option<bool> {
     static GS_COOKIE_ADDR: LazyLock<Option<u64>> = LazyLock::new(|| find_gs_cookie_va(game().pe));
+    let gs_cookie_ptr = unsafe { AtomicU64::from_ptr((*GS_COOKIE_ADDR)? as *mut u64) };
 
     const UNITNIT_GS_COOKIE: u64 = 0x2b992ddfa232;
+    Some(gs_cookie_ptr.load(Relaxed) != UNITNIT_GS_COOKIE)
+}
 
-    let gs_cookie_addr = GS_COOKIE_ADDR.ok_or("global security cookie not found")?;
-    let gs_cookie_ptr = unsafe { AtomicU64::from_ptr(gs_cookie_addr as *mut u64) };
-
-    let ts = Instant::now();
-
+pub unsafe fn wait_for_gs_cookie(timeout: Option<Duration>) -> Result<(), &'static str> {
     // Poll GS cookie every 10ms until it is no longer equal to the uninitialized value
+    let ts = Instant::now();
     while timeout.is_none_or(|timeout| ts.elapsed() < timeout) {
-        if gs_cookie_ptr.load(Relaxed) != UNITNIT_GS_COOKIE {
+        if is_gs_cookie_initialized().ok_or("global security cookie not found")? {
             return Ok(());
         }
-
         std::thread::sleep(Duration::from_millis(10));
     }
     Err("timed out waiting for __security_init_cookie")
@@ -210,7 +212,7 @@ pub fn process_main_thread() -> Option<OwnedHandle> {
     let pe_ep = pe.optional_header().ImageBase + pe.optional_header().AddressOfEntryPoint as u64;
 
     iter_threads(None).find(|thread| unsafe {
-        let mut thread_ep = 0;
+        let mut thread_ep: u64 = 0;
         let status = ntdll::NtQueryInformationThread(
             thread.raw(),
             ntdll::ThreadQuerySetWin32StartAddress,
@@ -268,4 +270,25 @@ pub fn is_created_suspended(thread: HANDLE) -> bool {
     // In particular, the Steam game overlay initializes itself using RIP thread hijacking
     // But another thread hijacking technique for suspended threads is overwriting RCX
     context.Rip == *RTL_USER_THREAD_START as u64 || context.Rcx == pe_ep
+}
+
+/// Check if the code calling this function is running before the game's entry point is executed.
+pub fn is_pre_entry_point() -> bool {
+    let Some(main_thread) = process_main_thread()
+    else {
+        log::warn!("process main thread not found, assuming dearxan is running pre entry point");
+        return true;
+    };
+
+    let main_thread_id = unsafe { GetThreadId(main_thread.raw()) };
+    let current_thread_id = unsafe { GetCurrentThreadId() };
+    if main_thread_id == current_thread_id {
+        !is_gs_cookie_initialized().unwrap_or_else(|| {
+            log::warn!("gs cookie not found, assuming dearxan is running post entry point");
+            true
+        })
+    }
+    else {
+        is_created_suspended(main_thread.raw())
+    }
 }
