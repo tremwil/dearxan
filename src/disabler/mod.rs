@@ -409,7 +409,7 @@ mod stub_instrumentation {
             Instruction::with1(Code::Push_rm64, RDX)?,
             Instruction::with2(Code::Sub_rm64_imm8, RSP, 0x28)?,
             Instruction::with2(Code::Mov_r64_imm64, RCX, hook_addr)?,
-            Instruction::with2(Code::Mov_r64_imm64, RAX, log_arxan_stub as u64)?,
+            Instruction::with2(Code::Mov_r64_imm64, RAX, log_arxan_stub as *const () as u64)?,
             Instruction::with1(Code::Call_rm64, RAX)?,
             Instruction::with2(
                 Code::Mov_r64_rm64,
