@@ -116,50 +116,66 @@ where
             make_module_rwe(game.pe);
         }
 
-        let analysis_time = Instant::now();
-        log::info!("analyzing Arxan stubs");
+        let all_passes_time = Instant::now();
+        let mut pass = 0;
 
-        let analysis_results = crate::analysis::analyze_all_stubs(game.pe);
-        let num_found = analysis_results.len();
-        log::info!(
-            "analysis completed in {:.3?}. {} stubs found",
-            analysis_time.elapsed(),
-            num_found
-        );
+        loop {
+            pass += 1;
+            log::info!("---- pass {pass} ----");
 
-        let good_stubs: Vec<_> = analysis_results
-            .into_iter()
-            .filter_map(|maybe_stub| maybe_stub.inspect_err(|err| log::error!("{err}")).ok())
-            .collect();
+            let analysis_time = Instant::now();
+            log::info!("analyzing remaining Arxan stubs");
 
-        if good_stubs.len() != num_found {
-            return Err("failed to generate patches for all stubs".into());
-        }
-
-        log::info!("generating patches");
-        let patch_gen_time = Instant::now();
-        let patches = crate::patch::ArxanPatch::build_from_stubs(
-            game.pe,
-            Some(game.preferred_base),
-            good_stubs.iter(),
-        )?;
-
-        log::info!(
-            "generated {} patches in {:.3?}",
-            patches.len(),
-            patch_gen_time.elapsed()
-        );
-
-        log::info!("applying patches");
-        let patch_apply_time = Instant::now();
-        for patch in &patches {
-            unsafe {
-                apply_patch(patch, &game.hook_buffer);
+            let analysis_results = crate::analysis::analyze_all_stubs(game.pe);
+            if analysis_results.is_empty() {
+                break;
             }
+
+            let num_found = analysis_results.len();
+            log::info!(
+                "analysis pass completed in {:.3?}. {} stubs found",
+                analysis_time.elapsed(),
+                num_found
+            );
+
+            let good_stubs: Vec<_> = analysis_results
+                .into_iter()
+                .filter_map(|maybe_stub| maybe_stub.inspect_err(|err| log::error!("{err}")).ok())
+                .collect();
+
+            if good_stubs.len() != num_found {
+                return Err("failed to generate patches for all stubs".into());
+            }
+
+            log::info!("generating patches");
+            let patch_gen_time = Instant::now();
+            let patches = crate::patch::ArxanPatch::build_from_stubs(
+                game.pe,
+                Some(game.preferred_base),
+                good_stubs.iter(),
+            )?;
+
+            log::info!(
+                "generated {} patches in {:.3?}",
+                patches.len(),
+                patch_gen_time.elapsed()
+            );
+
+            log::info!("applying patches");
+            let patch_apply_time = Instant::now();
+            for patch in &patches {
+                unsafe {
+                    apply_patch(patch, &game.hook_buffer);
+                }
+            }
+
+            log::info!("patches applied in {:.3?}.", patch_apply_time.elapsed());
         }
+
         log::info!(
-            "all patches applied in {:.3?}. Arxan is now neutered",
-            patch_apply_time.elapsed()
+            "no stubs remain, arxan is disabled (took {:.3?} in {} passes).",
+            all_passes_time.elapsed(),
+            pass - 1
         );
 
         Ok(Status {
