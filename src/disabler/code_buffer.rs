@@ -85,7 +85,7 @@ impl CodeBuffer {
 
     pub fn reserve(&self, size: usize) -> Option<*mut [u8]> {
         self.cursor
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |c| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |c| {
                 let new_cursor = c.with_addr(c.addr().checked_add(size)?);
                 (c < self.end).then_some(new_cursor)
             })
