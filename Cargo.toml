@@ -12,7 +12,7 @@ repository = "https://github.com/tremwil/dearxan"
 [workspace.dependencies]
 log = "0.4"
 simplelog = "0.12.2"
-clap = { version = "4.5.32", features = ["derive"] }
+clap = { version = "4.6.6", features = ["derive"] }
 pelite = { version = "0.10", default-features = false }
 
 [package]
@@ -40,14 +40,14 @@ internal_api = []
 pelite.workspace = true
 log.workspace = true
 iced-x86 = "1.21"
-memchr = "2.7.4"
+memchr = "2.8.3"
 fxhash = "0.2.1"
-indexmap = "2.7.1"
-bitvec = "1.0"
-bytemuck = "1.22"
+indexmap = "2.14.0"
+bitvec = "1.1"
+bytemuck = "1.25"
 bitfield-struct = "0.12.1"
-closure-ffi = { version = "5.0.1", optional = true }
-rayon = { version = "1.10", optional = true }
+closure-ffi = { version = "5.1.2", optional = true }
+rayon = { version = "1.12", optional = true }
 atomic-wait = "1.1.0"
 
 [dependencies.windows-sys]
@@ -69,7 +69,7 @@ clap.workspace = true
 clap-num = "1.2"
 dearxan-test-utils = { version = "0.5.3", path = "test_utils" }
 iced-x86 = { version = "1.21", features = ["code_asm"] }
-pretty-hex = "0.4.1"
+pretty-hex = "0.4.2"
 
 [profile.release]
 opt-level = 3
