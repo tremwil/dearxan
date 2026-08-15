@@ -105,7 +105,7 @@ Download the static library from the [Releases](https://github.com/tremwil/dearx
 
 ## Writing your own patcher
 
-If you want to patch an executable on disk, for example, you will need to write your own disabler. This will involve analyzing the Arxan stubs in the binary with `dearxan::analysis::analyze_all_stubs` or equivalent APIs, then passing the resulting `StubInfo` values to `dearxan::patch::ArxanPatch::build_from_stubs`. From there you will have to iterate over the patches and apply them to the executable manually.
+If you want to patch an executable on disk, for example, you will need to write your own disabler. This will involve analyzing the Arxan stubs in the binary with `dearxan::analysis::analyze_all_stubs` or equivalent APIs, then passing the resulting `StubInfo` values to `dearxan::patch::ArxanPatch::build_from_stubs`. From there you will have to iterate over the patches and apply them to the executable manually. This process must be repeated until no new stubs are found, since some games have encrypted stubs that are not discovered during the first analysis pass.
 
 Note that currently, for this to work on a live executable image it is important to make sure that the Arxan entry point stub has been invoked. For FromSoftware games, beware that binaries may be wrapped in SteamStub as well. 
 
