@@ -176,7 +176,7 @@ impl<'a> SteamStubContext<'a> {
             *block ^= key;
             key = *block;
         }
-        for block in encrypted_strings.chunks_exact_mut(4) {
+        for block in encrypted_strings.as_chunks_mut::<4>().0 {
             let new_block = bytemuck::pod_read_unaligned::<u32>(block) ^ key;
             block.copy_from_slice(bytemuck::bytes_of(&new_block));
             key = new_block;
@@ -229,7 +229,7 @@ impl SteamStubHeader {
 
         let key = self.drmp_xtea_key;
         let mut xor_key = [0x5555_5555u32; 2];
-        for block in drmp_dll.chunks_exact_mut(8) {
+        for block in drmp_dll.as_chunks_mut::<8>().0 {
             const DELTA: u32 = 0x9E3779B9;
             let mut sum: u32 = DELTA.wrapping_mul(32);
 
@@ -268,7 +268,7 @@ impl SteamStubHeader {
     pub fn decrypt_strings(&self, pe: PeView<'_>, mut key: u32) -> pelite::Result<Vec<u8>> {
         let mut strings = self.strings(pe)?.to_owned();
 
-        for block in strings.chunks_exact_mut(4) {
+        for block in strings.as_chunks_mut::<4>().0 {
             let next_key: u32 = bytemuck::pod_read_unaligned(block);
             block.copy_from_slice(bytemuck::bytes_of(&(key ^ next_key)));
             key = next_key;
