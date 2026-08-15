@@ -11,7 +11,7 @@ simplelog.workspace = true
 clap.workspace = true
 dll-syringe = { version = "0.17", default-features = false, features = ["syringe"] }
 dotenvy_macro = "0.15"
-steamlocate = "2.0"
+steamlocate = "2.1"
 
 [dependencies.windows]
 version = "0.61"
