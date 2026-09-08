@@ -10,7 +10,9 @@ use windows_sys::Win32::{
     Foundation::GetLastError,
     System::{
         Memory::{CreateFileMappingW, FILE_MAP_ALL_ACCESS, MapViewOfFile, PAGE_READWRITE},
-        Threading::{AcquireSRWLockExclusive, ReleaseSRWLockExclusive, SRWLOCK},
+        Threading::{
+            AcquireSRWLockExclusive, GetCurrentProcessId, ReleaseSRWLockExclusive, SRWLOCK,
+        },
     },
 };
 
@@ -94,14 +96,16 @@ struct LazyGlobalMapping<T> {
 #[track_caller]
 pub fn get_ptr<T, F: FnOnce() -> T>(name: &str, init: F) -> (*const T, usize) {
     unsafe {
-        // Filter invalid names and prepend the local (process-wide) namespace prefix.
+        // Filter invalid names before building the mapping name.
         if name.chars().any(|c| !c.is_ascii_alphanumeric() && c != '_') {
             panic!("{name} is not a valid file mapping name");
         }
 
         // Note: backslashes are not permitted after the prefix, but they are already
         // filtered out above.
-        let name = format!("Local\\{name}\0").encode_utf16().collect::<Vec<_>>();
+        let name = format!("Local\\{name}_{}\0", GetCurrentProcessId())
+            .encode_utf16()
+            .collect::<Vec<_>>();
 
         // Create or open the named file mapping backed by the paging file (no file handle).
         let mapping_handle = CreateFileMappingW(
