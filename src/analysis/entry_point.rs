@@ -1,6 +1,10 @@
 //! Tools for analyzing the entry point of an executable protected by Arxan.
 
-use iced_x86::{Code, Decoder, DecoderOptions, Register};
+use iced_x86::{
+    Code, Decoder, DecoderOptions,
+    FlowControl::{Exception, Interrupt},
+    Register,
+};
 
 use super::ImageView;
 use crate::analysis::vm::{MemoryStore, ProgramState, Registers, StepKind};
@@ -32,13 +36,16 @@ pub struct MsvcEntryPoint {
 
 impl MsvcEntryPoint {
     pub fn try_from_va(image: impl ImageView, entry_point_va: u64) -> Option<Self> {
-        // Parse the msvc crt entry point structure
-
-        const EXPECTED_CODES: &[&[Code]] = &[
-            &[Code::Sub_rm64_imm8],
-            &[Code::Call_rel32_64],
-            &[Code::Add_rm64_imm8],
-            &[Code::Jmp_rel32_64, Code::Jmp_rel8_64],
+        // Check if the first few instructions match that of a MSVC entry point.
+        //
+        // To support debuggers potentially hooking the first instruction with an interrupt or
+        // other exception (INT3, UD2, etc.), skip by the expected amount of bytes for the
+        // original instruction.
+        const EXPECTED_CODES: &[(&[Code], Option<usize>)] = &[
+            (&[Code::Sub_rm64_imm8], Some(4)),
+            (&[Code::Call_rel32_64], None),
+            (&[Code::Add_rm64_imm8], None),
+            (&[Code::Jmp_rel32_64, Code::Jmp_rel8_64], None),
         ];
 
         let mut decoder = Decoder::with_ip(
@@ -50,9 +57,17 @@ impl MsvcEntryPoint {
 
         let mut security_init_cookie_va = 0;
         let mut scrt_common_main_seh_va = 0;
-        for (i, &codes) in EXPECTED_CODES.iter().enumerate() {
+        for (i, (codes, skip)) in EXPECTED_CODES.iter().enumerate() {
             let instr = decoder.decode();
+
             if !codes.contains(&instr.code()) {
+                if let Some(skip) = skip
+                    && matches!(instr.flow_control(), Interrupt | Exception)
+                {
+                    log::debug!("assuming msvc crt is hooked, skipping instruction");
+                    decoder.set_position(decoder.position() + *skip).ok()?;
+                    continue;
+                }
                 return None;
             }
             match i {
