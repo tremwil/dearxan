@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.5.7] - 2026-10-10
+
+### Changed
+
+- Allow msvc entrypoint detection to fail on first instruction to support the debuggers that insert a software breakpoint
+
 ## [v0.5.6] - 2026-09-08
 
 ### Fixed
@@ -162,3 +168,22 @@ no new stubs show up.
 ## [v0.1.0] - 2025-08-06
 
 Initial release.
+
+[v0.5.7]: https://github.com/tremwil/dearxan/compare/v0.5.6...v0.5.7
+[v0.5.6]: https://github.com/tremwil/dearxan/compare/v0.5.5...v0.5.6
+[v0.5.5]: https://github.com/tremwil/dearxan/compare/v0.5.4...v0.5.5
+[v0.5.4]: https://github.com/tremwil/dearxan/compare/v0.5.3...v0.5.4
+[v0.5.3]: https://github.com/tremwil/dearxan/compare/v0.5.2...v0.5.3
+[v0.5.2]: https://github.com/tremwil/dearxan/compare/v0.5.1...v0.5.2
+[v0.5.1]: https://github.com/tremwil/dearxan/compare/v0.5.0...v0.5.1
+[v0.5.0]: https://github.com/tremwil/dearxan/compare/v0.4.1...v0.5.0
+[v0.4.1]: https://github.com/tremwil/dearxan/compare/v0.4.0...v0.4.1
+[v0.4.0]: https://github.com/tremwil/dearxan/compare/v0.3.1...v0.4.0
+[v0.3.1]: https://github.com/tremwil/dearxan/compare/v0.3.0...v0.3.1
+[v0.3.0]: https://github.com/tremwil/dearxan/compare/v0.2.2...v0.3.0
+[v0.2.2]: https://github.com/tremwil/dearxan/compare/v0.2.1...v0.2.2
+[v0.2.1]: https://github.com/tremwil/dearxan/compare/v0.2.0...v0.2.1
+[v0.2.0]: https://github.com/tremwil/dearxan/compare/v0.1.2...v0.2.0
+[v0.1.2]: https://github.com/tremwil/dearxan/compare/v0.1.1...v0.1.2
+[v0.1.1]: https://github.com/tremwil/dearxan/compare/v0.1.0...v0.1.1
+[v0.1.0]: https://github.com/tremwil/dearxan/tree/v0.1.0
