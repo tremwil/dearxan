@@ -306,7 +306,7 @@ checksum = "404d2b123c6e7e4d88965413607164a07afb8ffa2beb176323c009a223a98fdc"
 
 [[package]]
 name = "dearxan"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "atomic-wait",
  "bitfield-struct",
@@ -353,7 +353,7 @@ dependencies = [
 
 [[package]]
 name = "dearxan-test-utils"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "log",
  "pelite",
