@@ -20,7 +20,7 @@ path = ".."
 features = ["disabler", "rayon"]
 
 [dependencies.windows]
-version = "0.61"
+version = "0.62.2"
 features = [
     "Win32_System_Console",
     "Win32_System_LibraryLoader",
