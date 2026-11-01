@@ -39,14 +39,14 @@ internal_api = []
 [dependencies]
 pelite.workspace = true
 log.workspace = true
-iced-x86 = "1.21"
+iced-x86 = "1.22"
 memchr = "2.8.3"
 fxhash = "0.2.1"
 indexmap = "2.14.0"
 bitvec = "1.1"
 bytemuck = "1.25"
-bitfield-struct = "0.12.1"
-closure-ffi = { version = "5.1.2", optional = true }
+bitfield-struct = "0.13.0"
+closure-ffi = { version = "5.2.0", optional = true }
 rayon = { version = "1.12", optional = true }
 atomic-wait = "1.1.0"
 
@@ -68,7 +68,7 @@ simplelog.workspace = true
 clap.workspace = true
 clap-num = "1.2"
 dearxan-test-utils = { version = "0.5.3", path = "test_utils" }
-iced-x86 = { version = "1.21", features = ["code_asm"] }
+iced-x86 = { version = "1.22", features = ["code_asm"] }
 pretty-hex = "0.4.2"
 
 [profile.release]
